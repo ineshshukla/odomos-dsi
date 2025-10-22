@@ -1,0 +1,138 @@
+# 🐳 Docker Compose for Local Development
+# Mammography Report Analysis - Backend Services
+
+version: '3.8'
+
+services:
+  # Your Services (to be implemented)
+  document-ingestion:
+    build: ./document-ingestion
+    ports:
+      - "8001:8000"
+    environment:
+      - ENV=development
+    volumes:
+      - ./document-ingestion:/app
+    depends_on:
+      - redis
+      - postgres
+    networks:
+      - mammography-network
+
+  document-parsing:
+    build: ./document-parsing
+    ports:
+      - "8002:8000"
+    environment:
+      - ENV=development
+    volumes:
+      - ./document-parsing:/app
+    depends_on:
+      - redis
+    networks:
+      - mammography-network
+
+  information-structuring:
+    build: ./information-structuring
+    ports:
+      - "8003:8000"
+    environment:
+      - ENV=development
+    volumes:
+      - ./information-structuring:/app
+    depends_on:
+      - redis
+    networks:
+      - mammography-network
+
+  # Future Services (placeholders)
+  feature-engineering:
+    build: ./feature-engineering
+    ports:
+      - "8004:8000"
+    environment:
+      - ENV=development
+    volumes:
+      - ./feature-engineering:/app
+    depends_on:
+      - redis
+    networks:
+      - mammography-network
+
+  risk-prediction:
+    build: ./risk-prediction
+    ports:
+      - "8005:8000"
+    environment:
+      - ENV=development
+    volumes:
+      - ./risk-prediction:/app
+    depends_on:
+      - redis
+    networks:
+      - mammography-network
+
+  api-gateway:
+    build: ./api-gateway
+    ports:
+      - "8000:8000"
+    environment:
+      - ENV=development
+    volumes:
+      - ./api-gateway:/app
+    depends_on:
+      - document-ingestion
+      - document-parsing
+      - information-structuring
+    networks:
+      - mammography-network
+
+  # Infrastructure Services
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    networks:
+      - mammography-network
+
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      - POSTGRES_DB=mammography_db
+      - POSTGRES_USER=admin
+      - POSTGRES_PASSWORD=password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - mammography-network
+
+  # Monitoring (optional for development)
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./infrastructure/monitoring/prometheus:/etc/prometheus
+    networks:
+      - mammography-network
+
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    volumes:
+      - grafana_data:/var/lib/grafana
+    networks:
+      - mammography-network
+
+volumes:
+  postgres_data:
+  grafana_data:
+
+networks:
+  mammography-network:
+    driver: bridge
