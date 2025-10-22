@@ -221,7 +221,14 @@ Extract the following information from this mammography report and return it as 
 Report Text:
 {text}
 
-Extract and structure the following fields. If any field is not mentioned in the report, use "unknown" as the value:
+IMPORTANT INSTRUCTIONS:
+1. Extract only information that is explicitly mentioned in the report
+2. For fields not mentioned, use "unknown" as the value
+3. Clean up any OCR errors in the text (e.g., "tissuee aru" → "tissue are")
+4. Look for patient demographics in the report header or patient information section
+5. Extract dates, ages, and other numerical information if present
+
+Extract and structure the following fields:
 
 {{
   "indication": "Reason for the mammography (e.g., routine screening, follow-up, symptoms)",
@@ -229,21 +236,21 @@ Extract and structure the following fields. If any field is not mentioned in the
   "clinical_exam_result": "Results of clinical breast examination",
   "skin_abnormalities": "Any skin abnormalities noted",
   "nipple_abnormalities": "Any nipple abnormalities noted",
-  "gland_density": "Description of breast gland density",
+  "gland_density": "Description of breast gland density (clean up OCR errors)",
   "calcifications_present": "Presence of calcifications (yes/no/unknown)",
   "architectural_distortion": "Any architectural distortion present",
   "retracted_areas": "Any retracted areas noted",
   "suspicious_lymph_nodes": "Suspicious lymph nodes (yes/no/unknown)",
   "evaluation_possible": "Whether evaluation is possible (yes/no/unknown)",
-  "findings_summary": "Summary of all findings",
+  "findings_summary": "Summary of all findings (clean up OCR errors)",
   "acr_density_type": "ACR density type (A, B, C, D, or unknown)",
   "birads_score": "BI-RADS score (0, 1, 2, 3, 4, 5, 6, or unknown)",
   "followup_recommended": "Whether follow-up is recommended (yes/no/unknown)",
-  "recommendation_text": "Specific recommendations given",
+  "recommendation_text": "Specific recommendations given (clean up OCR errors)",
   "lmp": "Last menstrual period if mentioned",
   "hormonal_therapy": "Hormonal therapy status if mentioned",
-  "age": "Patient age if mentioned",
-  "children": "Number of children if mentioned"
+  "age": "Patient age if mentioned in the report",
+  "children": "Number of children if mentioned in the report"
 }}
 
 Return only valid JSON, no additional text or explanations.

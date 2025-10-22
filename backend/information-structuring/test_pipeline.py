@@ -172,30 +172,17 @@ def test_complete_pipeline(input_file: str):
                 print("\n📋 Structured Data Results:")
                 print("-" * 60)
                 
-                # Show key fields that were extracted
-                key_fields = [
-                    'indication', 'family_history_breast_pathology', 'acr_density_type',
-                    'birads_score', 'findings_summary', 'recommendation_text'
-                ]
-                
-                extracted_fields = 0
-                for field in key_fields:
-                    value = structured_data.get(field, 'unknown')
-                    if value != 'unknown':
-                        print(f"✅ {field}: {value}")
-                        extracted_fields += 1
-                    else:
-                        print(f"❓ {field}: {value}")
-                
-                print("-" * 60)
-                
-                # Show all extracted fields
-                print("\n📄 All Extracted Fields:")
+                # Show all fields (both extracted and unknown)
+                print("\n📄 All Fields:")
                 total_extracted = 0
                 for key, value in structured_data.items():
                     if value != 'unknown':
-                        print(f"  {key}: {value}")
+                        print(f"✅ {key}: {value}")
                         total_extracted += 1
+                    else:
+                        print(f"❓ {key}: {value}")
+                
+                print("-" * 60)
                 
                 # Check if structuring actually succeeded
                 if structuring_result['status'] == 'completed' and structuring_result['confidence_score'] is not None and total_extracted > 0:
@@ -225,70 +212,6 @@ def test_complete_pipeline(input_file: str):
         # Note: We don't delete the source file as it might be needed by the user
         print(f"\n📁 Test completed. Source file preserved: {test_file}")
 
-def test_manual_structuring():
-    """Test manual structuring if automatic triggering doesn't work"""
-    print("\n🔧 Testing Manual Structuring...")
-    
-    # Create a simple test document
-    test_content = """
-    MAMMOGRAPHY REPORT
-    Patient: Test Patient
-    BI-RADS: 2
-    Recommendation: Routine follow-up
-    """
-    
-    document_id = f"manual-test-{uuid.uuid4().hex[:8]}"
-    
-    try:
-        # Send structuring request directly
-        payload = {
-            "document_id": document_id,
-            "extracted_text": test_content
-        }
-        
-        response = requests.post(
-            f"{STRUCTURING_URL}/structuring/structure",
-            json=payload,
-            params={"api_key": API_KEY}
-        )
-        
-        if response.status_code == 200:
-            result = response.json()
-            print(f"📤 Structuring request sent. Status: {result['status']}")
-            
-            # Get full result
-            result_response = requests.get(
-                f"{STRUCTURING_URL}/structuring/result/{result['structuring_id']}",
-                params={"api_key": API_KEY}
-            )
-            
-            if result_response.status_code == 200:
-                full_result = result_response.json()
-                print(f"   Confidence Score: {full_result['confidence_score']}")
-                print(f"   BI-RADS Score: {full_result['structured_data']['birads_score']}")
-                
-                # Check if structuring actually succeeded
-                if full_result['status'] == 'completed' and full_result['confidence_score'] is not None:
-                    print("✅ Manual structuring successful!")
-                    return True
-                else:
-                    error_msg = full_result.get('error_message', 'Unknown error')
-                    print(f"❌ Manual structuring failed: {error_msg}")
-                    if not error_msg or error_msg == 'Unknown error':
-                        print("   💡 This usually means GEMINI_API_KEY is not configured")
-                        print("   💡 Check your .env file and make sure GEMINI_API_KEY is set")
-                    return False
-            else:
-                print(f"❌ Failed to get full result: {result_response.status_code}")
-                return False
-        else:
-            print(f"❌ Manual structuring failed: {response.status_code}")
-            print(response.text)
-            return False
-            
-    except Exception as e:
-        print(f"❌ Error in manual structuring: {str(e)}")
-        return False
 
 def main():
     """Run the complete pipeline test"""
@@ -330,9 +253,6 @@ def main():
     # Test complete pipeline
     pipeline_success = test_complete_pipeline(input_file)
     
-    # Test manual structuring as fallback
-    manual_success = test_manual_structuring()
-    
     # Summary
     print("\n" + "=" * 60)
     print("📊 Pipeline Test Results")
@@ -345,19 +265,13 @@ def main():
         print("❌ Complete pipeline test: ❌ FAILED")
         print("   Document processing failed - check GEMINI_API_KEY configuration")
     
-    if manual_success:
-        print("🎉 Manual structuring test: ✅ PASSED")
-        print("   Information Structuring Service is working correctly!")
-    else:
-        print("❌ Manual structuring test: ❌ FAILED")
-        print("   Check the Information Structuring Service configuration")
-    
     print("\n💡 Next Steps:")
     if not pipeline_success:
         print("   1. Check if GEMINI_API_KEY is configured in .env file")
         print("   2. Test the complete pipeline again")
-    print("   3. Implement Feature Engineering Service")
-    print("   4. Add more comprehensive test data")
+    else:
+        print("   1. Implement Feature Engineering Service")
+        print("   2. Add more comprehensive test data")
     
     print("\n📋 Usage:")
     print("   python3 test_pipeline.py <path_to_file>     # Test with your file")

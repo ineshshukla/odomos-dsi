@@ -1,0 +1,22 @@
+{
+  "indication": "unknown",
+  "family_history_breast_pathology": "unknown",
+  "clinical_exam_result": "unknown",
+  "skin_abnormalities": "unknown",
+  "nipple_abnormalities": "unknown",
+  "gland_density": "unknown",
+  "calcifications_present": "unknown",
+  "architectural_distortion": "unknown",
+  "retracted_areas": "unknown",
+  "suspicious_lymph_nodes": "unknown",
+  "evaluation_possible": "unknown",
+  "findings_summary": "unknown",
+  "acr_density_type": "unknown",
+  "birads_score": "2",
+  "followup_recommended": "yes",
+  "recommendation_text": "Routine follow-up",
+  "lmp": "unknown",
+  "hormonal_therapy": "unknown",
+  "age": "unknown",
+  "children": "unknown"
+}
