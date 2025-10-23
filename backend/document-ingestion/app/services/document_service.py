@@ -112,15 +112,53 @@ class DocumentService:
         if not document:
             return False
         
-        # Delete file from storage
-        file_path = Path(document.file_path)
-        if file_path.exists():
-            file_path.unlink()
-        
-        # Delete from database
-        self.db.delete(document)
-        self.db.commit()
-        return True
+        try:
+            # Delete processing statuses first (foreign key constraint)
+            self.db.query(ProcessingStatus).filter(
+                ProcessingStatus.document_id == document_id
+            ).delete()
+            
+            # Delete file from storage
+            file_path = Path(document.file_path)
+            if file_path.exists():
+                file_path.unlink()
+            
+            # Delete parsed text file if exists
+            parsed_file = Path(f"/code/DSI/odomos-dsi/backend/document-parsing/parsed/{document_id}.md")
+            if parsed_file.exists():
+                parsed_file.unlink()
+            
+            # Delete structured result file if exists
+            structured_file = Path(f"/code/DSI/odomos-dsi/backend/information-structuring/results/{document_id}.json")
+            if structured_file.exists():
+                structured_file.unlink()
+            
+            # Delete document from database
+            self.db.delete(document)
+            self.db.commit()
+            
+            # Notify other services to delete their records (fire and forget)
+            try:
+                import httpx
+                # Delete from parsing service
+                try:
+                    httpx.delete(f"http://localhost:8002/parsing/{document_id}/delete-internal", timeout=5.0)
+                except:
+                    pass
+                
+                # Delete from structuring service
+                try:
+                    httpx.delete(f"http://localhost:8003/structuring/{document_id}/delete-internal", timeout=5.0)
+                except:
+                    pass
+            except:
+                pass
+            
+            return True
+        except Exception as e:
+            self.db.rollback()
+            print(f"Error deleting document: {str(e)}")
+            raise e
     
     def get_processing_statuses(self, document_id: str) -> List[ProcessingStatus]:
         """Get processing statuses for a document"""

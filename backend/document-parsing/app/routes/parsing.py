@@ -107,3 +107,31 @@ async def parse_document_internal(
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Parsing failed: {str(e)}")
+
+@router.delete("/{document_id}/delete-internal", include_in_schema=False)
+async def delete_parsing_result_internal(
+    document_id: str,
+    db: Session = Depends(get_db)
+):
+    """Internal endpoint to delete parsing result (no auth required)"""
+    
+    try:
+        from pathlib import Path
+        from app.config import PARSED_DIR
+        
+        # Delete from database
+        from app.models.database import ParsingResult
+        result = db.query(ParsingResult).filter(ParsingResult.document_id == document_id).first()
+        if result:
+            db.delete(result)
+            db.commit()
+        
+        # Delete parsed file if exists
+        parsed_file = PARSED_DIR / f"{document_id}.md"
+        if parsed_file.exists():
+            parsed_file.unlink()
+        
+        return {"message": "Parsing result deleted successfully"}
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Delete failed: {str(e)}")

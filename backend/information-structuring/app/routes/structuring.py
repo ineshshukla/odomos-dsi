@@ -115,3 +115,31 @@ async def structure_document_internal(
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Structuring failed: {str(e)}")
+
+@router.delete("/{document_id}/delete-internal", include_in_schema=False)
+async def delete_structuring_result_internal(
+    document_id: str,
+    db: Session = Depends(get_db)
+):
+    """Internal endpoint to delete structuring result (no auth required)"""
+    
+    try:
+        from pathlib import Path
+        from app.config import RESULTS_DIR
+        
+        # Delete from database
+        from app.models.database import StructuringResult
+        result = db.query(StructuringResult).filter(StructuringResult.document_id == document_id).first()
+        if result:
+            db.delete(result)
+            db.commit()
+        
+        # Delete structured result file if exists
+        result_file = RESULTS_DIR / f"{document_id}.json"
+        if result_file.exists():
+            result_file.unlink()
+        
+        return {"message": "Structuring result deleted successfully"}
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Delete failed: {str(e)}")
