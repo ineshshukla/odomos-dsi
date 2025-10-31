@@ -65,8 +65,8 @@ class InformationStructuringService:
             # Update document-ingestion service about completion
             await self.update_document_status(document_id, "structured", "completed")
             
-            # Trigger next service (Feature Engineering)
-            await self.trigger_feature_engineering_service(document_id, structured_data)
+            # Trigger next service (Risk Prediction)
+            await self.trigger_risk_prediction_service(document_id, result.id, structured_data)
             
             return result
             
@@ -165,24 +165,16 @@ class InformationStructuringService:
         """Create mock structured data when API key is not available"""
         # Simple rule-based extraction for demo purposes
         mock_data = {
-            "indication": "unknown",
-            "family_history_breast_pathology": "unknown",
-            "clinical_exam_result": "unknown",
-            "skin_abnormalities": "unknown",
-            "nipple_abnormalities": "unknown",
-            "gland_density": "unknown",
-            "calcifications_present": "unknown",
-            "architectural_distortion": "unknown",
-            "retracted_areas": "unknown",
-            "suspicious_lymph_nodes": "unknown",
-            "evaluation_possible": "unknown",
-            "findings_summary": "unknown",
-            "acr_density_type": "unknown",
-            "birads_score": "unknown",
-            "followup_recommended": "unknown",
-            "recommendation_text": "unknown",
+            "medical_unit": "unknown",
+            "full_report": text[:500] if text else "unknown",  # First 500 chars
             "lmp": "unknown",
             "hormonal_therapy": "unknown",
+            "family_history": "unknown",
+            "reason": "unknown",
+            "observations": "unknown",
+            "conclusion": "unknown",
+            "recommendations": "unknown",
+            "birads": "unknown",
             "age": "unknown",
             "children": "unknown"
         }
@@ -193,21 +185,71 @@ class InformationStructuringService:
         # Extract BI-RADS score
         if "bi-rads" in text_lower or "birads" in text_lower:
             for score in ["0", "1", "2", "3", "4", "5", "6"]:
-                if f"bi-rads {score}" in text_lower or f"birads {score}" in text_lower:
-                    mock_data["birads_score"] = score
+                if f"bi-rads {score}" in text_lower or f"birads {score}" in text_lower or f"birads: {score}" in text_lower:
+                    mock_data["birads"] = score
                     break
         
-        # Extract indication
+        # Extract reason/indication
         if "routine" in text_lower and "screening" in text_lower:
-            mock_data["indication"] = "routine screening"
+            mock_data["reason"] = "routine screening"
         elif "follow" in text_lower and "up" in text_lower:
-            mock_data["indication"] = "follow-up"
+            mock_data["reason"] = "follow-up"
+        elif "symptomatic" in text_lower or "symptom" in text_lower:
+            mock_data["reason"] = "symptomatic"
         
-        # Extract ACR density
-        if "dense" in text_lower:
-            if "heterogeneously" in text_lower:
-                mock_data["acr_density_type"] = "C"
-                mock_data["gland_density"] = "heterogeneously dense"
+        # Extract age
+        import re
+        age_patterns = [r'age[:\s]+(\d+)', r'(\d+)\s*(?:year|yr)', r'patient.*?(\d+)\s*(?:year|yr)']
+        for pattern in age_patterns:
+            match = re.search(pattern, text_lower)
+            if match:
+                age_val = int(match.group(1))
+                if 18 <= age_val <= 100:  # Reasonable age range
+                    mock_data["age"] = str(age_val)
+                    break
+        
+        # Extract family history
+        if "family history" in text_lower:
+            if "positive" in text_lower or "yes" in text_lower:
+                mock_data["family_history"] = "positive"
+            elif "negative" in text_lower or "no" in text_lower:
+                mock_data["family_history"] = "negative"
+        
+        # Extract LMP
+        lmp_match = re.search(r'lmp[:\s]*([\d/\-\.]+)', text_lower)
+        if lmp_match:
+            mock_data["lmp"] = lmp_match.group(1)
+        
+        # Extract observations (look for findings section)
+        obs_keywords = ["findings", "observations", "impression"]
+        for keyword in obs_keywords:
+            if keyword in text_lower:
+                start_idx = text_lower.find(keyword)
+                # Get next 200 chars after keyword
+                obs_text = text[start_idx:start_idx+200].strip()
+                if obs_text:
+                    mock_data["observations"] = obs_text
+                    break
+        
+        # Extract conclusion
+        conclusion_keywords = ["conclusion", "impression", "assessment"]
+        for keyword in conclusion_keywords:
+            if keyword in text_lower:
+                start_idx = text_lower.find(keyword)
+                conclusion_text = text[start_idx:start_idx+150].strip()
+                if conclusion_text:
+                    mock_data["conclusion"] = conclusion_text
+                    break
+        
+        # Extract recommendations
+        rec_keywords = ["recommendation", "suggest", "advised", "follow-up"]
+        for keyword in rec_keywords:
+            if keyword in text_lower:
+                start_idx = text_lower.find(keyword)
+                rec_text = text[start_idx:start_idx+150].strip()
+                if rec_text:
+                    mock_data["recommendations"] = rec_text
+                    break
             elif "extremely" in text_lower:
                 mock_data["acr_density_type"] = "D"
                 mock_data["gland_density"] = "extremely dense"
@@ -235,7 +277,8 @@ class InformationStructuringService:
         return f"""
 You are a medical AI assistant specializing in mammography report analysis.
 
-Extract the following information from this mammography report and return it as valid JSON:
+Extract the following information from this mammography report and return it as valid JSON.
+These fields match the format used for training the BI-RADS prediction model.
 
 Report Text:
 {text}
@@ -243,34 +286,33 @@ Report Text:
 IMPORTANT INSTRUCTIONS:
 1. Extract only information that is explicitly mentioned in the report
 2. For fields not mentioned, use "unknown" as the value
-3. Clean up any OCR errors in the text (e.g., "tissuee aru" → "tissue are")
-4. Look for patient demographics in the report header or patient information section
-5. Extract dates, ages, and other numerical information if present
+3. Clean up any OCR errors in the text
+4. Be thorough - extract complete sentences for observations, conclusion, and recommendations
+5. Extract dates, ages, and numerical information if present
 
-Extract and structure the following fields:
+Extract and structure the following fields (match exactly):
 
 {{
-  "indication": "Reason for the mammography (e.g., routine screening, follow-up, symptoms)",
-  "family_history_breast_pathology": "Family history of breast cancer or other breast pathology",
-  "clinical_exam_result": "Results of clinical breast examination",
-  "skin_abnormalities": "Any skin abnormalities noted",
-  "nipple_abnormalities": "Any nipple abnormalities noted",
-  "gland_density": "Description of breast gland density (clean up OCR errors)",
-  "calcifications_present": "Presence of calcifications (yes/no/unknown)",
-  "architectural_distortion": "Any architectural distortion present",
-  "retracted_areas": "Any retracted areas noted",
-  "suspicious_lymph_nodes": "Suspicious lymph nodes (yes/no/unknown)",
-  "evaluation_possible": "Whether evaluation is possible (yes/no/unknown)",
-  "findings_summary": "Summary of all findings (clean up OCR errors)",
-  "acr_density_type": "ACR density type (A, B, C, D, or unknown)",
-  "birads_score": "BI-RADS score (0, 1, 2, 3, 4, 5, 6, or unknown)",
-  "followup_recommended": "Whether follow-up is recommended (yes/no/unknown)",
-  "recommendation_text": "Specific recommendations given (clean up OCR errors)",
-  "lmp": "Last menstrual period if mentioned",
-  "hormonal_therapy": "Hormonal therapy status if mentioned",
-  "age": "Patient age if mentioned in the report",
-  "children": "Number of children if mentioned in the report"
+  "medical_unit": "Name of the medical unit, hospital, or clinic (extract from header/letterhead)",
+  "full_report": "Complete full text of the report (all sections combined, clean up OCR errors)",
+  "lmp": "Last menstrual period date if mentioned (format: DD/MM/YYYY or as stated)",
+  "hormonal_therapy": "Hormonal therapy status (yes/no/details, or unknown)",
+  "family_history": "Family history of breast cancer or breast pathology (positive/negative/details)",
+  "reason": "Reason for mammography examination (e.g., routine screening, follow-up, symptomatic, diagnostic)",
+  "observations": "Detailed clinical observations and findings from the examination (include density, masses, calcifications, asymmetries, etc.)",
+  "conclusion": "Radiologist's conclusion, impression, or assessment (the diagnostic interpretation)",
+  "recommendations": "Recommended follow-up actions or management (e.g., routine screening, additional imaging, biopsy)",
+  "birads": "BI-RADS category (0, 1, 2, 3, 4, 4A, 4B, 4C, 5, 6, or unknown)",
+  "age": "Patient age in years (extract number only)",
+  "children": "Number of children or parity information (extract number or description)"
 }}
+
+IMPORTANT: 
+- For "full_report", include ALL text from the report
+- For "observations", include ALL findings mentioned (density, masses, calcifications, skin changes, lymph nodes, etc.)
+- For "conclusion", extract the impression or assessment section
+- For "recommendations", extract the follow-up plan
+- Clean up OCR errors but preserve medical terminology
 
 Return only valid JSON, no additional text or explanations.
 """
@@ -326,26 +368,35 @@ Return only valid JSON, no additional text or explanations.
         except Exception as e:
             print(f"Warning: Failed to update document status: {str(e)}")
     
-    async def trigger_feature_engineering_service(self, document_id: str, structured_data: StructuredData) -> None:
-        """Trigger feature engineering service"""
+    async def trigger_risk_prediction_service(
+        self, 
+        document_id: str, 
+        structuring_id: str,
+        structured_data: StructuredData
+    ) -> None:
+        """Trigger risk prediction service after structuring completes"""
         try:
             payload = {
                 "document_id": document_id,
+                "structuring_id": structuring_id,
                 "structured_data": structured_data.dict()
             }
             
             async with httpx.AsyncClient() as client:
                 response = await client.post(
-                    "http://localhost:8004/api/v1/features",
+                    "http://localhost:8004/predictions/predict-internal",
                     json=payload,
-                    timeout=30.0
+                    timeout=60.0  # Allow more time for model inference
                 )
                 
-                if response.status_code != 200:
-                    print(f"Warning: Feature Engineering service returned {response.status_code}")
+                if response.status_code == 200:
+                    print(f"✅ Risk prediction triggered successfully for document {document_id}")
+                else:
+                    print(f"⚠️  Risk Prediction service returned {response.status_code}")
                     
         except Exception as e:
-            print(f"Warning: Failed to trigger Feature Engineering service: {str(e)}")
+            print(f"⚠️  Failed to trigger Risk Prediction service: {str(e)}")
+            # Don't fail the structuring if prediction fails - it can be retried later
     
     def get_structuring_result(self, document_id: str) -> Optional[StructuringResult]:
         """Get structuring result by document ID"""

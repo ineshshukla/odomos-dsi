@@ -32,6 +32,8 @@ class DocumentStatus(BaseModel):
     file_info: FileInfo
     created_at: datetime
     updated_at: datetime
+    clinic_name: Optional[str] = None
+    upload_timestamp: Optional[datetime] = None
     processing_statuses: List[dict] = []
 
 class DocumentListResponse(BaseModel):

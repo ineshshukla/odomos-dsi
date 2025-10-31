@@ -18,8 +18,8 @@ NC='\033[0m' # No Color
 
 # Service definitions with their ports and directories
 # Using arrays instead of associative arrays for bash 3.2 compatibility
-SERVICES_NAMES=("authentication" "document-ingestion" "document-parsing" "information-structuring")
-SERVICES_PORTS=("8010" "8001" "8002" "8003")
+SERVICES_NAMES=("authentication" "document-ingestion" "document-parsing" "information-structuring" "risk-prediction")
+SERVICES_PORTS=("8010" "8001" "8002" "8003" "8004")
 
 # Helper function to get port for a service
 get_service_port() {

@@ -24,7 +24,8 @@ class DocumentService:
         file_content: bytes, 
         filename: str, 
         content_type: str,
-        metadata: UploadMetadata
+        metadata: UploadMetadata,
+        clinic_name: Optional[str] = None
     ) -> Document:
         """Upload and store a document"""
         
@@ -45,6 +46,7 @@ class DocumentService:
             file_size=file_size,
             content_type=content_type,
             uploader_id=metadata.uploader_id,
+            clinic_name=clinic_name,
             patient_id=metadata.patient_id,
             status="uploaded"
         )

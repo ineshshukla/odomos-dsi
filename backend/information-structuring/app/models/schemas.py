@@ -18,25 +18,17 @@ class StructureResponse(BaseModel):
     message: str
 
 class StructuredData(BaseModel):
-    """Structured mammography data model"""
-    indication: str = Field(default="unknown", description="Reason for mammography")
-    family_history_breast_pathology: str = Field(default="unknown", description="Family history of breast issues")
-    clinical_exam_result: str = Field(default="unknown", description="Clinical examination results")
-    skin_abnormalities: str = Field(default="unknown", description="Skin abnormalities")
-    nipple_abnormalities: str = Field(default="unknown", description="Nipple abnormalities")
-    gland_density: str = Field(default="unknown", description="Breast gland density")
-    calcifications_present: str = Field(default="unknown", description="Presence of calcifications")
-    architectural_distortion: str = Field(default="unknown", description="Architectural distortion")
-    retracted_areas: str = Field(default="unknown", description="Retracted areas")
-    suspicious_lymph_nodes: str = Field(default="unknown", description="Suspicious lymph nodes")
-    evaluation_possible: str = Field(default="unknown", description="Whether evaluation is possible")
-    findings_summary: str = Field(default="unknown", description="Summary of findings")
-    acr_density_type: str = Field(default="unknown", description="ACR density type (A, B, C, D)")
-    birads_score: str = Field(default="unknown", description="BI-RADS score (0-6)")
-    followup_recommended: str = Field(default="unknown", description="Follow-up recommended")
-    recommendation_text: str = Field(default="unknown", description="Recommendation text")
+    """Structured mammography data model - matches training data format"""
+    medical_unit: str = Field(default="unknown", description="Medical unit or hospital name")
+    full_report: str = Field(default="unknown", description="Complete report text")
     lmp: str = Field(default="unknown", description="Last menstrual period")
     hormonal_therapy: str = Field(default="unknown", description="Hormonal therapy status")
+    family_history: str = Field(default="unknown", description="Family history of breast pathology")
+    reason: str = Field(default="unknown", description="Reason for mammography examination")
+    observations: str = Field(default="unknown", description="Clinical observations and findings")
+    conclusion: str = Field(default="unknown", description="Radiologist's conclusion/impression")
+    recommendations: str = Field(default="unknown", description="Recommended follow-up actions")
+    birads: str = Field(default="unknown", description="BI-RADS score (0-6)")
     age: str = Field(default="unknown", description="Patient age")
     children: str = Field(default="unknown", description="Number of children")
 

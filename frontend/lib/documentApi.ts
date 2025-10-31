@@ -3,7 +3,7 @@
  */
 
 import { API_CONFIG, STORAGE_KEYS } from './config'
-import type { UploadDocumentResponse, DocumentStatus, ListDocumentsResponse } from './types'
+import type { UploadDocumentResponse, DocumentStatus, ListDocumentsResponse, PredictionResult } from './types'
 
 /**
  * Get authorization headers with access token
@@ -44,7 +44,7 @@ export async function listDocuments(
   pageSize: number = 10
 ): Promise<ListDocumentsResponse> {
   const response = await fetch(
-    `${API_CONFIG.DOCUMENT_INGESTION}/documents?page=${page}&page_size=${pageSize}`,
+    `${API_CONFIG.DOCUMENT_INGESTION}/documents/?page=${page}&page_size=${pageSize}`,
     {
       method: 'GET',
       headers: {
@@ -211,4 +211,123 @@ export async function downloadDocument(documentId: string): Promise<Blob> {
   }
 
   return response.blob()
+}
+
+/**
+ * Get risk prediction for a document
+ */
+export async function getRiskPrediction(documentId: string): Promise<PredictionResult> {
+  const response = await fetch(
+    `${API_CONFIG.RISK_PREDICTION}/predictions/document/${documentId}`,
+    {
+      method: 'GET',
+      headers: {
+        ...getAuthHeaders(),
+        'Content-Type': 'application/json',
+      },
+    }
+  )
+
+  if (!response.ok) {
+    if (response.status === 404) {
+      throw new Error('Prediction not found - document may still be processing')
+    }
+    const error = await response.json().catch(() => ({ detail: 'Failed to fetch prediction' }))
+    throw new Error(error.detail || error.message || 'Failed to fetch prediction')
+  }
+
+  return response.json()
+}
+
+/**
+ * Get parsed text for a document
+ */
+export async function getParsedText(documentId: string): Promise<{
+  document_id: string
+  parsed_text: string
+  extracted_at: string
+}> {
+  const response = await fetch(
+    `${API_CONFIG.DOCUMENT_PARSING}/parsing/${documentId}`,
+    {
+      method: 'GET',
+      headers: {
+        ...getAuthHeaders(),
+        'Content-Type': 'application/json',
+      },
+    }
+  )
+
+  if (!response.ok) {
+    if (response.status === 404) {
+      throw new Error('Parsed text not found - document may still be processing')
+    }
+    const error = await response.json().catch(() => ({ detail: 'Failed to fetch parsed text' }))
+    throw new Error(error.detail || error.message || 'Failed to fetch parsed text')
+  }
+
+  return response.json()
+}
+
+/**
+ * Get structured data for a document
+ */
+export async function getStructuredData(documentId: string): Promise<{
+  id: string
+  document_id: string
+  structured_data: any
+  status: string
+  created_at: string
+}> {
+  const response = await fetch(
+    `${API_CONFIG.INFORMATION_STRUCTURING}/structuring/result/document/${documentId}`,
+    {
+      method: 'GET',
+      headers: {
+        ...getAuthHeaders(),
+        'Content-Type': 'application/json',
+      },
+    }
+  )
+
+  if (!response.ok) {
+    if (response.status === 404) {
+      throw new Error('Structured data not found - document may still be processing')
+    }
+    const error = await response.json().catch(() => ({ detail: 'Failed to fetch structured data' }))
+    throw new Error(error.detail || error.message || 'Failed to fetch structured data')
+  }
+
+  return response.json()
+}
+
+/**
+ * Update review status for a document
+ */
+export async function updateReviewStatus(
+  documentId: string,
+  reviewStatus: string,
+  coordinatorNotes?: string
+): Promise<PredictionResult> {
+  const response = await fetch(
+    `${API_CONFIG.RISK_PREDICTION}/predictions/document/${documentId}/review`,
+    {
+      method: 'PATCH',
+      headers: {
+        ...getAuthHeaders(),
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        review_status: reviewStatus,
+        coordinator_notes: coordinatorNotes || null,
+      }),
+    }
+  )
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Failed to update review status' }))
+    throw new Error(error.detail || error.message || 'Failed to update review status')
+  }
+
+  return response.json()
 }

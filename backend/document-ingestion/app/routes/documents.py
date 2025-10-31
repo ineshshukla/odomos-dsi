@@ -44,13 +44,17 @@ async def upload_document(
             description=description
         )
         
+        # Get clinic/organization name from JWT token
+        clinic_name = current_user.get("organization", "Unknown Clinic")
+        
         # Upload document
         document_service = DocumentService(db)
         document = await document_service.upload_document(
             file_content=file_content,
             filename=file.filename,
             content_type=mime_type,
-            metadata=metadata
+            metadata=metadata,
+            clinic_name=clinic_name
         )
         
         # Create response
@@ -102,6 +106,8 @@ async def get_document_status(
         file_info=file_info,
         created_at=document.created_at,
         updated_at=document.updated_at,
+        clinic_name=document.clinic_name,
+        upload_timestamp=document.created_at,
         processing_statuses=[
             {
                 "service_name": ps.service_name,
@@ -143,6 +149,8 @@ async def list_documents(
             file_info=file_info,
             created_at=doc.created_at,
             updated_at=doc.updated_at,
+            clinic_name=doc.clinic_name,
+            upload_timestamp=doc.created_at,
             processing_statuses=[]
         ))
     

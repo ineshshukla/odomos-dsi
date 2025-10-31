@@ -11,13 +11,19 @@ import { useRouter } from "next/navigation"
 import { ThemeToggle } from "@/components/theme-toggle"
 import { ProtectedRoute } from "@/components/ProtectedRoute"
 import { useAuth } from "@/contexts/AuthContext"
+import { listDocuments, getRiskPrediction } from "@/lib/documentApi"
+import type { DocumentStatus, PredictionResult } from "@/lib/types"
 
 interface ReportRecord {
   id: string
-  patientId: string
+  documentId: string
+  filename: string
   clinicName: string
   submissionDate: string
-  riskScore: "High" | "Medium" | "Low"
+  riskScore: "High" | "Medium" | "Low" | "Pending"
+  riskLevel: string
+  predictedBirads: string
+  confidence: number
   reviewStatus: "New" | "Under Review" | "Follow-up Initiated" | "Review Complete"
 }
 
@@ -25,91 +31,24 @@ export default function GCFDashboardPage() {
   const [searchTerm, setSearchTerm] = useState("")
   const [riskFilter, setRiskFilter] = useState("All")
   const [clinicFilter, setClinicFilter] = useState("All")
-  const [reports, setReports] = useState<ReportRecord[]>([
-    {
-      id: "1",
-      patientId: "P789-A",
-      clinicName: "Mercy General Hospital",
-      submissionDate: "2024-01-15",
-      riskScore: "High",
-      reviewStatus: "Follow-up Initiated", // Updated status to reflect changes from detail screen
-    },
-    {
-      id: "2",
-      patientId: "P456-B",
-      clinicName: "City Imaging Center",
-      submissionDate: "2024-01-15",
-      riskScore: "High",
-      reviewStatus: "Under Review",
-    },
-    {
-      id: "3",
-      patientId: "P123-C",
-      clinicName: "Regional Medical Center",
-      submissionDate: "2024-01-14",
-      riskScore: "High",
-      reviewStatus: "Follow-up Initiated",
-    },
-    {
-      id: "4",
-      patientId: "P890-D",
-      clinicName: "Downtown Clinic",
-      submissionDate: "2024-01-14",
-      riskScore: "High",
-      reviewStatus: "New",
-    },
-    {
-      id: "5",
-      patientId: "P234-E",
-      clinicName: "Mercy General Hospital",
-      submissionDate: "2024-01-13",
-      riskScore: "Medium",
-      reviewStatus: "Under Review",
-    },
-    {
-      id: "6",
-      patientId: "P567-F",
-      clinicName: "City Imaging Center",
-      submissionDate: "2024-01-13",
-      riskScore: "Medium",
-      reviewStatus: "New",
-    },
-    {
-      id: "7",
-      patientId: "P345-G",
-      clinicName: "Regional Medical Center",
-      submissionDate: "2024-01-12",
-      riskScore: "Medium",
-      reviewStatus: "Review Complete",
-    },
-    {
-      id: "8",
-      patientId: "P678-H",
-      clinicName: "Downtown Clinic",
-      submissionDate: "2024-01-12",
-      riskScore: "Medium",
-      reviewStatus: "Follow-up Initiated",
-    },
-    {
-      id: "9",
-      patientId: "P901-I",
-      clinicName: "Mercy General Hospital",
-      submissionDate: "2024-01-11",
-      riskScore: "Medium",
-      reviewStatus: "Review Complete",
-    },
-    {
-      id: "10",
-      patientId: "P012-J",
-      clinicName: "City Imaging Center",
-      submissionDate: "2024-01-11",
-      riskScore: "Low",
-      reviewStatus: "Review Complete",
-    },
-  ])
+  const [reports, setReports] = useState<ReportRecord[]>([])
+  const [isLoading, setIsLoading] = useState(true)
+  const [error, setError] = useState<string>("")
 
   const router = useRouter()
   const { user, logout } = useAuth()
+
+  // Load documents and predictions
+  useEffect(() => {
+    loadReports()
+    
+    // Auto-refresh every 10 seconds to see new predictions
+    const interval = setInterval(() => {
+      loadReports()
+    }, 10000)
+    
+    return () => clearInterval(interval)
+  }, [])
 
   useEffect(() => {
     const handleStorageChange = () => {
@@ -131,10 +70,81 @@ export default function GCFDashboardPage() {
     return () => window.removeEventListener("storage", handleStorageChange)
   }, [])
 
+  const loadReports = async () => {
+    setIsLoading(true)
+    setError("")
+    try {
+      // Fetch all documents (GCF coordinators can see all documents)
+      const response = await listDocuments(1, 100)
+      
+      // Fetch predictions for each document
+      const reportsWithPredictions = await Promise.all(
+        response.documents.map(async (doc: DocumentStatus) => {
+          let prediction: PredictionResult | null = null
+          let riskScore: "High" | "Medium" | "Low" | "Pending" = "Pending"
+          let riskLevel = "needs_assessment"
+          let predictedBirads = "N/A"
+          let confidence = 0
+          
+          try {
+            // Only fetch prediction if document is structured
+            if (doc.status === "structured" || doc.status === "predicted") {
+              prediction = await getRiskPrediction(doc.upload_id)
+              
+              if (prediction) {
+                riskLevel = prediction.risk_level
+                predictedBirads = prediction.predicted_birads
+                confidence = prediction.confidence_score
+                
+                // Map risk_level to riskScore
+                switch (prediction.risk_level) {
+                  case "high":
+                    riskScore = "High"
+                    break
+                  case "medium":
+                    riskScore = "Medium"
+                    break
+                  case "low":
+                    riskScore = "Low"
+                    break
+                  default:
+                    riskScore = "Pending"
+                }
+              }
+            }
+          } catch (err) {
+            console.error(`Failed to load prediction for document ${doc.upload_id}:`, err)
+          }
+          
+          return {
+            id: doc.upload_id,
+            documentId: doc.upload_id,
+            filename: doc.file_info.filename,
+            clinicName: doc.clinic_name || "Unknown Clinic",
+            submissionDate: new Date(doc.upload_timestamp || doc.created_at).toLocaleDateString(),
+            riskScore,
+            riskLevel,
+            predictedBirads,
+            confidence,
+            reviewStatus: (prediction?.review_status as "New" | "Under Review" | "Follow-up Initiated" | "Review Complete") || "New",
+          }
+        })
+      )
+      
+      setReports(reportsWithPredictions)
+    } catch (err) {
+      console.error("Failed to load reports:", err)
+      setError(err instanceof Error ? err.message : "Failed to load reports")
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
   const filteredReports = reports.filter((report) => {
     const matchesSearch =
-      report.patientId.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      report.clinicName.toLowerCase().includes(searchTerm.toLowerCase())
+      report.filename.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      report.clinicName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      report.documentId.toLowerCase().includes(searchTerm.toLowerCase())
     const matchesRisk = riskFilter === "All" || report.riskScore === riskFilter
     const matchesClinic = clinicFilter === "All" || report.clinicName === clinicFilter
 
@@ -149,6 +159,8 @@ export default function GCFDashboardPage() {
         return "risk-medium px-2 py-1 rounded-full text-xs font-medium"
       case "Low":
         return "risk-low px-2 py-1 rounded-full text-xs font-medium"
+      case "Pending":
+        return "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400 px-2 py-1 rounded-full text-xs font-medium"
       default:
         return "bg-gray-100 text-gray-800 px-2 py-1 rounded-full text-xs font-medium"
     }
@@ -173,11 +185,12 @@ export default function GCFDashboardPage() {
     router.push(`/report-detail/${report.id}`)
   }
 
-  // Calculate KPIs
-  const newReportsToday = reports.filter((r) => r.submissionDate === "2024-01-15").length
+  // Calculate KPIs from real data
+  const today = new Date().toLocaleDateString()
+  const newReportsToday = reports.filter((r) => r.submissionDate === today).length
   const highRiskPending = reports.filter((r) => r.riskScore === "High" && r.reviewStatus !== "Review Complete").length
   const mediumRiskCases = reports.filter((r) => r.riskScore === "Medium").length
-  const totalReports = 342 // Static number as per spec
+  const totalReports = reports.length
 
   return (
     <ProtectedRoute allowedRoles={['gcf_coordinator']}>
@@ -272,7 +285,7 @@ export default function GCFDashboardPage() {
                 <div className="relative flex-1">
                   <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground w-4 h-4" />
                   <Input
-                    placeholder="Search by Patient ID or Name..."
+                    placeholder="Search by Document or Clinic Name..."
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
                     className="pl-10 dark:bg-muted/50 dark:border-primary/30 dark:focus:border-primary dark:focus:ring-primary/20"
@@ -287,6 +300,7 @@ export default function GCFDashboardPage() {
                     <SelectItem value="High">High Risk</SelectItem>
                     <SelectItem value="Medium">Medium Risk</SelectItem>
                     <SelectItem value="Low">Low Risk</SelectItem>
+                    <SelectItem value="Pending">Pending Assessment</SelectItem>
                   </SelectContent>
                 </Select>
                 <Select value={clinicFilter} onValueChange={setClinicFilter}>
@@ -295,10 +309,9 @@ export default function GCFDashboardPage() {
                   </SelectTrigger>
                   <SelectContent className="dark:bg-card dark:border-primary/30">
                     <SelectItem value="All">All Clinics</SelectItem>
-                    <SelectItem value="Mercy General Hospital">Mercy General Hospital</SelectItem>
-                    <SelectItem value="City Imaging Center">City Imaging Center</SelectItem>
-                    <SelectItem value="Regional Medical Center">Regional Medical Center</SelectItem>
-                    <SelectItem value="Downtown Clinic">Downtown Clinic</SelectItem>
+                    {Array.from(new Set(reports.map(r => r.clinicName))).map(clinic => (
+                      <SelectItem key={clinic} value={clinic}>{clinic}</SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>
@@ -309,7 +322,8 @@ export default function GCFDashboardPage() {
                   <thead>
                     <tr className="border-b border-border">
                       <th className="text-left py-3 px-4 font-medium text-foreground">Risk Score</th>
-                      <th className="text-left py-3 px-4 font-medium text-foreground">Patient Identifier</th>
+                      <th className="text-left py-3 px-4 font-medium text-foreground">BI-RADS</th>
+                      <th className="text-left py-3 px-4 font-medium text-foreground">Document</th>
                       <th className="text-left py-3 px-4 font-medium text-foreground">Clinic Name</th>
                       <th className="text-left py-3 px-4 font-medium text-foreground">Submission Date</th>
                       <th className="text-left py-3 px-4 font-medium text-foreground">Review Status</th>
@@ -317,31 +331,61 @@ export default function GCFDashboardPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {filteredReports.map((report) => (
-                      <tr
-                        key={report.id}
-                        className="border-b border-border hover:bg-muted/50 dark:hover:bg-primary/5 transition-colors"
-                      >
-                        <td className="py-3 px-4">
-                          <span className={getRiskBadgeClass(report.riskScore)}>{report.riskScore}</span>
-                        </td>
-                        <td className="py-3 px-4 font-mono text-foreground">{report.patientId}</td>
-                        <td className="py-3 px-4 text-foreground">{report.clinicName}</td>
-                        <td className="py-3 px-4 text-muted-foreground">{report.submissionDate}</td>
-                        <td className="py-3 px-4">
-                          <span className={getStatusBadgeClass(report.reviewStatus)}>{report.reviewStatus}</span>
-                        </td>
-                        <td className="py-3 px-4">
-                          <Button
-                            size="sm"
-                            onClick={() => handleViewDetails(report)}
-                            className="bg-primary hover:bg-primary/90 text-primary-foreground glow-primary"
-                          >
-                            View Details
-                          </Button>
+                    {isLoading ? (
+                      <tr>
+                        <td colSpan={7} className="py-8 text-center text-muted-foreground">
+                          Loading reports...
                         </td>
                       </tr>
-                    ))}
+                    ) : error ? (
+                      <tr>
+                        <td colSpan={7} className="py-8 text-center text-destructive">
+                          {error}
+                        </td>
+                      </tr>
+                    ) : filteredReports.length === 0 ? (
+                      <tr>
+                        <td colSpan={7} className="py-8 text-center text-muted-foreground">
+                          No reports found
+                        </td>
+                      </tr>
+                    ) : (
+                      filteredReports.map((report) => (
+                        <tr
+                          key={report.id}
+                          className="border-b border-border hover:bg-muted/50 dark:hover:bg-primary/5 transition-colors"
+                        >
+                          <td className="py-3 px-4">
+                            <span className={getRiskBadgeClass(report.riskScore)}>{report.riskScore}</span>
+                          </td>
+                          <td className="py-3 px-4 font-mono text-foreground">
+                            {report.predictedBirads}
+                            {report.confidence > 0 && (
+                              <span className="text-xs text-muted-foreground ml-1">
+                                ({(report.confidence * 100).toFixed(1)}%)
+                              </span>
+                            )}
+                          </td>
+                          <td className="py-3 px-4 text-foreground truncate max-w-xs" title={report.filename}>
+                            {report.filename}
+                          </td>
+                          <td className="py-3 px-4 text-foreground">{report.clinicName}</td>
+                          <td className="py-3 px-4 text-muted-foreground">{report.submissionDate}</td>
+                          <td className="py-3 px-4">
+                            <span className={getStatusBadgeClass(report.reviewStatus)}>{report.reviewStatus}</span>
+                          </td>
+                          <td className="py-3 px-4">
+                            <Button
+                              size="sm"
+                              onClick={() => handleViewDetails(report)}
+                              className="bg-primary hover:bg-primary/90 text-primary-foreground glow-primary"
+                            >
+                              View Details
+                            </Button>
+                          </td>
+                        </tr>
+                      ))
+                    )}
                   </tbody>
                 </table>
               </div>

@@ -59,8 +59,10 @@ export interface DocumentStatus {
   }
   created_at: string
   updated_at?: string
-  status: 'pending' | 'processing' | 'uploaded' | 'parsed' | 'structured' | 'failed'
+  status: 'pending' | 'processing' | 'uploaded' | 'parsed' | 'structured' | 'predicted' | 'failed'
   clinic?: string
+  clinic_name?: string
+  upload_timestamp?: string
   error?: string
 }
 
@@ -122,4 +124,24 @@ export interface UploadFormData {
   file: File
   patient_id?: string
   clinic_id?: string
+}
+
+// Risk Prediction Types
+export interface PredictionResult {
+  prediction_id: string
+  document_id: string
+  structuring_id?: string
+  predicted_birads: string
+  predicted_label_id: number
+  confidence_score: number
+  probabilities: Record<string, number>
+  risk_level: 'high' | 'medium' | 'low' | 'needs_assessment' | 'unknown'
+  review_status?: string
+  coordinator_notes?: string
+  reviewed_by?: string
+  reviewed_at?: string
+  model_version: string
+  processing_time?: number
+  status: string
+  created_at: string
 }

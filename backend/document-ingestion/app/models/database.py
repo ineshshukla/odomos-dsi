@@ -24,6 +24,7 @@ class Document(Base):
     file_size = Column(Integer, nullable=False)
     content_type = Column(String(100), nullable=False)
     uploader_id = Column(String(100), nullable=False)
+    clinic_name = Column(String(255), nullable=True)  # Clinic/organization name
     patient_id = Column(String(100), nullable=True)
     status = Column(String(50), default="uploaded")
     created_at = Column(DateTime, default=datetime.utcnow)
