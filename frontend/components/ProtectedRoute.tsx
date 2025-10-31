@@ -9,7 +9,7 @@ export function ProtectedRoute({
   allowedRoles 
 }: { 
   children: React.ReactNode
-  allowedRoles?: ('clinic_admin' | 'gcf_coordinator')[]
+  allowedRoles?: ('clinic_admin' | 'gcf_coordinator' | 'super_admin')[]
 }) {
   const { user, isLoading } = useAuth()
   const router = useRouter()
@@ -27,6 +27,8 @@ export function ProtectedRoute({
           router.push('/clinic-portal')
         } else if (user.role === 'gcf_coordinator') {
           router.push('/gcf-dashboard')
+        } else if (user.role === 'super_admin') {
+          router.push('/super-admin')
         }
       }
     }

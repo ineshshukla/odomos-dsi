@@ -60,5 +60,11 @@ get_clinic_admin = JWTBearer(required_roles=["clinic_admin"])
 # Dependency for GCF coordinator only
 get_gcf_coordinator = JWTBearer(required_roles=["gcf_coordinator"])
 
-# Dependency for both roles
+# Dependency for super admin only
+get_super_admin = JWTBearer(required_roles=["super_admin"])
+
+# Dependency for both clinic admin and GCF coordinator
 get_any_user = JWTBearer(required_roles=["clinic_admin", "gcf_coordinator"])
+
+# Dependency for all user types (including super admin)
+get_any_authenticated_user = JWTBearer(required_roles=["clinic_admin", "gcf_coordinator", "super_admin"])

@@ -4,7 +4,7 @@ export interface User {
   email: string
   full_name: string
   organization: string
-  role: 'clinic_admin' | 'gcf_coordinator'
+  role: 'clinic_admin' | 'gcf_coordinator' | 'super_admin'
   is_active: boolean
   created_at: string
   updated_at: string
@@ -21,7 +21,7 @@ export interface RegisterData {
   password: string
   full_name: string
   organization: string
-  role: 'clinic_admin' | 'gcf_coordinator'
+  role: 'clinic_admin' | 'gcf_coordinator' | 'super_admin'
 }
 
 export interface Token {

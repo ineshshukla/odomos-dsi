@@ -248,7 +248,7 @@ export async function getParsedText(documentId: string): Promise<{
   extracted_at: string
 }> {
   const response = await fetch(
-    `${API_CONFIG.DOCUMENT_PARSING}/parsing/${documentId}`,
+    `${API_CONFIG.DOCUMENT_PARSING}/parsing/result/document/${documentId}`,
     {
       method: 'GET',
       headers: {
@@ -266,7 +266,14 @@ export async function getParsedText(documentId: string): Promise<{
     throw new Error(error.detail || error.message || 'Failed to fetch parsed text')
   }
 
-  return response.json()
+  const data = await response.json()
+  
+  // Map backend field names to frontend expected format
+  return {
+    document_id: data.document_id,
+    parsed_text: data.extracted_text, // Backend uses 'extracted_text'
+    extracted_at: data.created_at
+  }
 }
 
 /**

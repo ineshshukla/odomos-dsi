@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { AuraLogo } from "@/components/aura-logo"
 import { Upload, FileText, CheckCircle, Clock, AlertCircle, Trash2 } from "lucide-react"
+import { useRouter } from "next/navigation"
 import { ThemeToggle } from "@/components/theme-toggle"
 import { ProtectedRoute } from "@/components/ProtectedRoute"
 import { useAuth } from "@/contexts/AuthContext"
@@ -14,6 +15,7 @@ import { uploadDocument, listDocuments, deleteDocument } from "@/lib/documentApi
 import type { DocumentStatus } from "@/lib/types"
 
 export default function ClinicPortalPage() {
+  const router = useRouter()
   const [isUploading, setIsUploading] = useState(false)
   const [uploadProgress, setUploadProgress] = useState(0)
   const [showSuccess, setShowSuccess] = useState(false)

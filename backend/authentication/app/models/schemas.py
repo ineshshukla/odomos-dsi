@@ -8,10 +8,10 @@ from pydantic import BaseModel, EmailStr, Field
 class UserCreate(BaseModel):
     """Schema for user creation"""
     email: EmailStr
-    password: str = Field(..., min_length=6)
+    password: str = Field(..., min_length=2)
     full_name: str
     organization: Optional[str] = None
-    role: str = Field(..., pattern="^(clinic_admin|gcf_coordinator)$")
+    role: str = Field(..., pattern="^(clinic_admin|gcf_coordinator|super_admin)$")
 
 class UserLogin(BaseModel):
     """Schema for user login"""

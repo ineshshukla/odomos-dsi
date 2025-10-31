@@ -269,20 +269,6 @@ export default function ReportDetailPage() {
               </CardContent>
             </Card>
 
-            {/* Parsed Text Card */}
-            {report.parsedText && (
-              <Card className="card-glow dark:bg-card/80 dark:backdrop-blur-sm">
-                <CardHeader>
-                  <CardTitle className="text-foreground">Extracted Text</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="bg-muted/50 rounded-lg p-4 max-h-96 overflow-y-auto">
-                    <div className="whitespace-pre-wrap text-sm text-foreground font-mono leading-relaxed">{report.parsedText}</div>
-                  </div>
-                </CardContent>
-              </Card>
-            )}
-
             {/* Structured Data Card */}
             {report.structuredData && (
               <Card className="card-glow dark:bg-card/80 dark:backdrop-blur-sm">

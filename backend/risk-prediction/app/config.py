@@ -12,7 +12,7 @@ PORT = 8004
 # Model Configuration
 BASE_DIR = Path(__file__).resolve().parent.parent
 # Point to the model in model-training directory (note the space in directory name)
-MODEL_PATH = os.getenv("MODEL_PATH", "/Users/jallu/odomos-dsi/backend/model-training/biogpt_birads_classifier /best_model")
+MODEL_PATH = os.getenv("MODEL_PATH", "/Users/jallu/odomos-dsi/backend/model-training/biogpt_birads_classifier/best_model")
 
 # Database Configuration
 DATABASE_URL = os.getenv("DATABASE_URL", f"sqlite:///{BASE_DIR}/predictions.db")

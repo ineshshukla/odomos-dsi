@@ -10,7 +10,7 @@ interface RegisterData {
   password: string
   full_name: string
   organization: string
-  role: 'clinic_admin' | 'gcf_coordinator'
+  role: 'clinic_admin' | 'gcf_coordinator' | 'super_admin'
 }
 
 interface AuthContextType {
@@ -84,6 +84,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         router.push('/clinic-portal')
       } else if (data.user.role === 'gcf_coordinator') {
         router.push('/gcf-dashboard')
+      } else if (data.user.role === 'super_admin') {
+        router.push('/super-admin')
       }
     } catch (error) {
       console.error('Login error:', error)
