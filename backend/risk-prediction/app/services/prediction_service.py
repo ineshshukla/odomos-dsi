@@ -4,6 +4,7 @@ Prediction Service - Core logic for risk prediction using BioGPT model
 import torch
 import time
 import logging
+import os
 from typing import Dict, Optional
 from transformers import AutoTokenizer, BioGptForSequenceClassification
 from scipy.special import softmax
@@ -11,7 +12,7 @@ import numpy as np
 from sqlalchemy.orm import Session
 
 from app.models.database import Prediction
-from app.config import MODEL_PATH, RISK_THRESHOLDS, MIN_CONFIDENCE_THRESHOLD
+from app.config import MODEL_PATH, RISK_THRESHOLDS, MIN_CONFIDENCE_THRESHOLD, USE_HUGGINGFACE_MODEL
 
 logger = logging.getLogger(__name__)
 
@@ -27,10 +28,25 @@ class PredictionService:
         self._load_model()
     
     def _load_model(self):
-        """Load the trained BioGPT model"""
+        """Load the trained BioGPT model from HuggingFace or local path"""
         try:
-            logger.info(f"Loading model from {self.model_path}")
+            if USE_HUGGINGFACE_MODEL:
+                logger.info(f"Downloading model from HuggingFace: {self.model_path}")
+                logger.info("This may take a few minutes on first run...")
+            else:
+                logger.info(f"Loading model from local path: {self.model_path}")
+                
+                # Check if local path exists
+                if not os.path.exists(self.model_path):
+                    raise FileNotFoundError(
+                        f"Local model path not found: {self.model_path}\n"
+                        f"Please train the model first or set USE_HUGGINGFACE_MODEL=true"
+                    )
+            
+            # Load tokenizer
             self.tokenizer = AutoTokenizer.from_pretrained(self.model_path)
+            
+            # Load model
             self.model = BioGptForSequenceClassification.from_pretrained(self.model_path)
             
             # Check for GPU
@@ -38,7 +54,10 @@ class PredictionService:
             self.model.to(self.device)
             self.model.eval()  # Set to evaluation mode
             
-            logger.info(f"Model loaded successfully on {self.device}")
+            model_source = "HuggingFace Hub" if USE_HUGGINGFACE_MODEL else "local storage"
+            logger.info(f"✓ Model loaded successfully from {model_source} on {self.device}")
+            logger.info(f"Model configuration: {self.model.config.num_labels} classes")
+            
         except Exception as e:
             logger.error(f"Failed to load model: {e}")
             raise RuntimeError(f"Model loading failed: {e}")

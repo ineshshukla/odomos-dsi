@@ -11,9 +11,20 @@ PORT = 8004
 
 # Model Configuration
 BASE_DIR = Path(__file__).resolve().parent.parent
-# Point to the model in model-training directory - use relative path from backend directory
+
+# HuggingFace Model Configuration
+HUGGINGFACE_MODEL_REPO = os.getenv("HUGGINGFACE_MODEL_REPO", "ishro/biogpt-aura")
+USE_HUGGINGFACE_MODEL = os.getenv("USE_HUGGINGFACE_MODEL", "true").lower() == "true"
+
+# Local model path (fallback or for local development)
 BACKEND_DIR = BASE_DIR.parent
-MODEL_PATH = os.getenv("MODEL_PATH", str(BACKEND_DIR / "model-training" / "biogpt_birads_classifier" / "best_model"))
+LOCAL_MODEL_PATH = os.getenv("LOCAL_MODEL_PATH", str(BACKEND_DIR / "model-training" / "biogpt_birads_classifier" / "best_model"))
+
+# Final model path selection
+if USE_HUGGINGFACE_MODEL:
+    MODEL_PATH = HUGGINGFACE_MODEL_REPO  # Will download from HuggingFace
+else:
+    MODEL_PATH = LOCAL_MODEL_PATH  # Use local model
 
 # Database Configuration
 DATABASE_URL = os.getenv("DATABASE_URL", f"sqlite:///{BASE_DIR}/predictions.db")
