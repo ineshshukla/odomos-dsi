@@ -16,10 +16,24 @@ from transformers import (
 # --- Configuration ---
 FILE_NAME = "radiology_reports.csv"
 DELIMITER = ";"
-# Columns to combine for the model's input text
-TEXT_COLUMNS = ["Observations", "Conclusion", "Recommendations"]
+
+# --- Feature Configuration ---
+TEXT_COLUMNS = ["Observations", "Conclusion", "Recommendations", "Reason"]
+
+# New: Tabular columns to serialize into text
+TABULAR_COLUMNS = [
+    # "Medical_Unit",
+    "Hormonal_Therapy",
+    "Family_History",
+    "Age",
+    "Children"
+]
+# We are intentionally omitting:
+# - ID_R, Year, Month, LMP (per your instruction)
+# - Full_Report (as we are combining the specific report sections)
+
 TARGET_COLUMN = "BI-RADS" # The column we want to predict
-MODEL_NAME = "microsoft/biogpt"
+MODEL_NAME = "microsoft/biogpt-large"
 TEST_SIZE = 0.2  # 20% of data for testing
 RANDOM_STATE = 42 # For reproducible results
 OUTPUT_DIR = "./biogpt_birads_classifier"
@@ -29,7 +43,7 @@ hf_logging.set_verbosity_info()
 
 def load_and_preprocess_data():
     """
-    Loads the CSV, combines text fields, and maps labels.
+    Loads the CSV, combines text and tabular fields, and maps labels.
     """
     print(f"--- Step 1: Loading Data from {FILE_NAME} ---")
     try:
@@ -45,16 +59,46 @@ def load_and_preprocess_data():
 
     print(f"Loaded {len(df)} reports.")
 
-    # --- Text Preprocessing ---
+    # --- Text & Feature Preprocessing ---
+    print("Preprocessing text and serializing tabular features...")
+    
     # Fill any missing text fields with an empty string
     for col in TEXT_COLUMNS:
         df[col] = df[col].fillna("")
         
-    # Combine text columns into a single 'text' field
-    df['text'] = df[TEXT_COLUMNS].apply(
+    # Fill missing tabular data with "Unknown"
+    # We convert all to string to handle mixed types gracefully
+    for col in TABULAR_COLUMNS:
+        df[col] = df[col].fillna("Unknown").astype(str)
+
+    # --- Create the combined 'text' field ---
+    
+    # 1. Create the main report text
+    df['report_text'] = df[TEXT_COLUMNS].apply(
         lambda x: ' '.join(x.astype(str)), axis=1
     )
     
+    # 2. Create the serialized metadata string
+    # This creates a string like:
+    # "Medical Unit: X. Hormonal Therapy: Y. Family History: Z. Age: A. Children: B."
+    def create_metadata_string(row):
+        parts = []
+        parts.append(f"Medical Unit: {row['Medical_Unit']}")
+        parts.append(f"Hormonal Therapy: {row['Hormonal_Therapy']}")
+        parts.append(f"Family History: {row['Family_History']}")
+        parts.append(f"Age: {row['Age']}")
+        parts.append(f"Children: {row['Children']}")
+        return ". ".join(parts) + "."
+
+    df['metadata_text'] = df.apply(create_metadata_string, axis=1)
+
+    # 3. Combine metadata and report text with a separator
+    # The [REPORT] token helps the model distinguish metadata from the report
+    df['text'] = df['metadata_text'] + " [REPORT] " + df['report_text']
+    
+    print("Example of combined text input:")
+    print(df['text'].iloc[0])
+
     # --- Label Preprocessing ---
     # Drop rows where the target label is missing
     df = df.dropna(subset=[TARGET_COLUMN])
@@ -79,6 +123,7 @@ def load_and_preprocess_data():
     df['label'] = df[TARGET_COLUMN].map(label2id)
     
     # Keep only the columns we need
+    # We also keep TARGET_COLUMN for the final evaluation comparison
     final_df = df[['text', 'label', TARGET_COLUMN]]
     
     return final_df, label2id, id2label, num_labels
@@ -96,6 +141,7 @@ def tokenize_data(train_df, test_df):
         
     def tokenize_function(examples):
         # Truncate to the model's max input size
+        # The new metadata text will take up some of the 512 tokens
         return tokenizer(
             examples['text'], 
             padding="max_length", 
@@ -112,13 +158,22 @@ def tokenize_data(train_df, test_df):
     tokenized_train = train_dataset.map(tokenize_function, batched=True)
     tokenized_test = test_dataset.map(tokenize_function, batched=True)
     
+    # Remove original columns to prepare for the model
+    # Check for '__index_level_0__' which is sometimes added by from_pandas
+    train_remove_cols = [TARGET_COLUMN, 'text']
+    if '__index_level_0__' in tokenized_train.column_names:
+        train_remove_cols.append('__index_level_0__')
+        
+    test_remove_cols = [TARGET_COLUMN, 'text']
+    if '__index_level_0__' in tokenized_test.column_names:
+        test_remove_cols.append('__index_level_0__')
+
+    tokenized_train = tokenized_train.remove_columns(train_remove_cols)
+    tokenized_test = tokenized_test.remove_columns(test_remove_cols)
+    
     # Set format for PyTorch
-    tokenized_train = tokenized_train.remove_columns(
-        [TARGET_COLUMN, '__index_level_0__', 'text']
-    )
-    tokenized_test = tokenized_test.remove_columns(
-        [TARGET_COLUMN, '__index_level_0__', 'text']
-    )
+    tokenized_train.set_format("torch")
+    tokenized_test.set_format("torch")
 
     return tokenized_train, tokenized_test, tokenizer
 
@@ -219,11 +274,6 @@ def evaluate_and_predict(trainer, test_df, tokenized_test, id2label):
     predictions = trainer.predict(tokenized_test)
     raw_scores = predictions.predictions
     
-    # Convert logits to probabilities (optional, but good to see)
-    # probabilities = torch.nn.functional.softmax(
-    #    torch.from_numpy(raw_scores), dim=1
-    # ).numpy()
-    
     # Get the predicted class ID (the one with the highest score)
     predicted_label_ids = np.argmax(raw_scores, axis=1)
     
@@ -231,6 +281,7 @@ def evaluate_and_predict(trainer, test_df, tokenized_test, id2label):
     predicted_labels = [id2label[label_id] for label_id in predicted_label_ids]
     
     # Add predictions to our original test DataFrame
+    # Note: test_df was created with .copy(), so this is safe
     test_df['predicted_label_id'] = predicted_label_ids
     test_df['predicted_birads'] = predicted_labels
     
@@ -243,7 +294,6 @@ def evaluate_and_predict(trainer, test_df, tokenized_test, id2label):
     print(f"Text: {test_df.iloc[0]['text'][:500]}...")
     print(f"Actual BI-RADS:   {test_df.iloc[0][TARGET_COLUMN]}")
     print(f"Predicted BI-RADS: {test_df.iloc[0]['predicted_birads']}")
-    # print(f"Probabilities: {probabilities[0]}")
 
 
 def main():
