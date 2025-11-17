@@ -28,6 +28,9 @@ RUN pip install --upgrade pip && pip install -r requirements.txt
 # Copy application code
 COPY . .
 
+# Run database migrations
+RUN python migrate_add_progress.py
+
 # Pre-download RapidOCR models and fonts to avoid runtime downloads
 # These are the exact models and resources that get downloaded at runtime
 RUN mkdir -p /usr/local/lib/python3.11/site-packages/rapidocr/models && \
