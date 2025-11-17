@@ -25,7 +25,13 @@ class PredictionService:
         self.model = None
         self.tokenizer = None
         self.device = None
-        self._load_model()
+        self._model_loaded = False
+    
+    def _ensure_model_loaded(self):
+        """Ensure the model is loaded before use (lazy loading)"""
+        if not self._model_loaded:
+            self._load_model()
+            self._model_loaded = True
     
     def _load_model(self):
         """Load the trained BioGPT model from HuggingFace or local path"""
@@ -123,7 +129,8 @@ class PredictionService:
         self,
         document_id: str,
         structured_data: Dict,
-        structuring_id: Optional[str] = None
+        structuring_id: Optional[str] = None,
+        force_recompute: bool = False,
     ) -> Prediction:
         """
         Generate risk prediction from structured data.
@@ -139,12 +146,15 @@ class PredictionService:
         start_time = time.time()
         
         try:
+            # Ensure model is loaded (lazy loading)
+            self._ensure_model_loaded()
+            
             # Check if prediction already exists
             existing_prediction = self.db.query(Prediction).filter(
                 Prediction.document_id == document_id
             ).first()
-            
-            if existing_prediction:
+
+            if existing_prediction and not force_recompute:
                 logger.info(f"Prediction already exists for document {document_id}")
                 return existing_prediction
             
@@ -187,25 +197,43 @@ class PredictionService:
             # Calculate processing time
             processing_time = time.time() - start_time
             
-            # Create prediction record
-            prediction = Prediction(
-                document_id=document_id,
-                structuring_id=structuring_id,
-                predicted_birads=predicted_birads,
-                predicted_label_id=str(predicted_label_id),
-                confidence_score=confidence_score,
-                probabilities=prob_dict,
-                risk_level=risk_level,
-                model_version="biogpt-v1",
-                model_path=self.model_path,
-                input_text=report_text[:500],  # Store first 500 chars
-                processing_time=processing_time,
-                status="completed"
-            )
-            
-            self.db.add(prediction)
-            self.db.commit()
-            self.db.refresh(prediction)
+            # Create or update prediction record
+            if existing_prediction:
+                # Update existing record
+                existing_prediction.predicted_birads = predicted_birads
+                existing_prediction.predicted_label_id = str(predicted_label_id)
+                existing_prediction.confidence_score = confidence_score
+                existing_prediction.probabilities = prob_dict
+                existing_prediction.risk_level = risk_level
+                existing_prediction.model_version = "biogpt-v1"
+                existing_prediction.model_path = self.model_path
+                existing_prediction.input_text = report_text[:500]
+                existing_prediction.processing_time = processing_time
+                existing_prediction.status = "completed"
+                existing_prediction.error_message = None
+
+                self.db.commit()
+                self.db.refresh(existing_prediction)
+                prediction = existing_prediction
+            else:
+                prediction = Prediction(
+                    document_id=document_id,
+                    structuring_id=structuring_id,
+                    predicted_birads=predicted_birads,
+                    predicted_label_id=str(predicted_label_id),
+                    confidence_score=confidence_score,
+                    probabilities=prob_dict,
+                    risk_level=risk_level,
+                    model_version="biogpt-v1",
+                    model_path=self.model_path,
+                    input_text=report_text[:500],  # Store first 500 chars
+                    processing_time=processing_time,
+                    status="completed"
+                )
+
+                self.db.add(prediction)
+                self.db.commit()
+                self.db.refresh(prediction)
             
             logger.info(
                 f"Prediction completed for document {document_id}: "

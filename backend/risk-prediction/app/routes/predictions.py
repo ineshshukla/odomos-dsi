@@ -2,6 +2,8 @@
 Prediction routes for risk assessment
 """
 from fastapi import APIRouter, Depends, HTTPException
+import asyncio
+from typing import Dict
 from sqlalchemy.orm import Session
 
 from app.models.database import get_db
@@ -14,6 +16,7 @@ from app.models.schemas import (
 )
 from app.services.prediction_service import PredictionService
 from app.utils.auth_middleware import get_any_user, get_current_user
+from app.models.database import SessionLocal, Prediction as PredictionModel
 
 router = APIRouter(prefix="/predictions", tags=["predictions"])
 
@@ -140,6 +143,90 @@ async def predict_risk_internal(
         print(f"   ❌ Prediction failed: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Prediction failed: {str(e)}")
 
+
+@router.get("/model/status", tags=["predictions"])
+async def model_status(db: Session = Depends(get_db)):
+    """Return whether the model is currently loaded"""
+    service = PredictionService(db)
+    return {"loaded": service.is_model_loaded(), "model_path": service.model_path}
+
+
+@router.post("/predict-async", response_model=PredictionResponse, include_in_schema=False)
+async def predict_async(
+    request: PredictionRequest,
+    db: Session = Depends(get_db),
+):
+    """Queue a prediction to run asynchronously and return immediately (internal use).
+
+    This inserts/updates a pending Prediction record and schedules background work
+    that will perform the actual model inference and update the record when done.
+    """
+    # Ensure a pending record exists
+    existing = db.query(PredictionModel).filter(PredictionModel.document_id == request.document_id).first()
+    if not existing:
+        pending = PredictionModel(
+            document_id=request.document_id,
+            structuring_id=request.structuring_id,
+            predicted_birads="unknown",
+            predicted_label_id="unknown",
+            confidence_score=0.0,
+            probabilities={},
+            risk_level="unknown",
+            status="pending",
+        )
+        db.add(pending)
+        db.commit()
+        db.refresh(pending)
+        prediction_id = pending.id
+    else:
+        existing.status = "pending"
+        db.commit()
+        prediction_id = existing.id
+
+    # Background task to perform prediction using its own DB session
+    async def _background_predict():
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"🔄 Starting background prediction for document {request.document_id}")
+        
+        session = SessionLocal()
+        try:
+            svc = PredictionService(session)
+            # Force recompute so we overwrite the pending row
+            result = await svc.generate_prediction(
+                document_id=request.document_id,
+                structured_data=request.structured_data,
+                structuring_id=request.structuring_id,
+                force_recompute=True,
+            )
+            logger.info(f"✅ Background prediction completed for document {request.document_id}: {result.status}")
+        except Exception as e:
+            logger.error(f"❌ Background prediction failed for document {request.document_id}: {str(e)}", exc_info=True)
+            # Update the record with failure
+            try:
+                row = session.query(PredictionModel).filter(PredictionModel.document_id == request.document_id).first()
+                if row:
+                    row.status = "failed"
+                    row.error_message = str(e)
+                    session.commit()
+                    logger.info(f"Updated prediction record to failed status")
+            except Exception as update_error:
+                logger.error(f"Failed to update error status: {str(update_error)}")
+        finally:
+            session.close()
+            logger.info(f"🔚 Background task finished for document {request.document_id}")
+
+    task = asyncio.create_task(_background_predict())
+    # Add callback to log any unhandled exceptions
+    def log_task_exception(t):
+        if t.exception():
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"Unhandled exception in background task: {t.exception()}", exc_info=t.exception())
+    task.add_done_callback(log_task_exception)
+
+    return PredictionResponse(prediction_id=prediction_id, document_id=request.document_id, status="pending", message="Prediction queued")
+
 @router.delete("/{document_id}/delete-internal", include_in_schema=False)
 async def delete_prediction_internal(
     document_id: str,
@@ -180,15 +267,30 @@ async def update_review_status(
         from datetime import datetime
         
         prediction = db.query(Prediction).filter(Prediction.document_id == document_id).first()
-        if not prediction:
-            raise HTTPException(status_code=404, detail="Prediction not found for this document")
         
-        # Update review fields
-        prediction.review_status = review_update.review_status
-        prediction.coordinator_notes = review_update.coordinator_notes
-        prediction.reviewed_by = current_user.get("sub")  # User ID
-        prediction.reviewed_at = datetime.utcnow()
-        prediction.updated_at = datetime.utcnow()
+        # Create prediction record if it doesn't exist yet (for pending predictions)
+        if not prediction:
+            prediction = Prediction(
+                document_id=document_id,
+                predicted_birads="unknown",
+                predicted_label_id="unknown",
+                confidence_score=0.0,
+                probabilities={},
+                risk_level="pending",
+                status="pending",
+                review_status=review_update.review_status,
+                coordinator_notes=review_update.coordinator_notes,
+                reviewed_by=current_user.get("sub"),
+                reviewed_at=datetime.utcnow()
+            )
+            db.add(prediction)
+        else:
+            # Update existing prediction
+            prediction.review_status = review_update.review_status
+            prediction.coordinator_notes = review_update.coordinator_notes
+            prediction.reviewed_by = current_user.get("sub")
+            prediction.reviewed_at = datetime.utcnow()
+            prediction.updated_at = datetime.utcnow()
         
         db.commit()
         db.refresh(prediction)

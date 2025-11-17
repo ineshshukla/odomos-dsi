@@ -8,11 +8,15 @@ services:
   document-ingestion:
     build: ./document-ingestion
     ports:
-      - "8001:8000"
+      - "8001:8001"
     environment:
       - ENV=development
+      - DOCUMENT_PARSING_URL=http://document-parsing:8002
+      - INFORMATION_STRUCTURING_URL=http://information-structuring:8003
+      - RISK_PREDICTION_URL=http://risk-prediction:8004
     volumes:
       - ./document-ingestion:/app
+      - shared-storage:/app/storage
     depends_on:
       - redis
       - postgres
@@ -22,11 +26,14 @@ services:
   document-parsing:
     build: ./document-parsing
     ports:
-      - "8002:8000"
+      - "8002:8002"
     environment:
       - ENV=development
+      - DOCUMENT_INGESTION_URL=http://document-ingestion:8001
+      - INFORMATION_STRUCTURING_URL=http://information-structuring:8003
     volumes:
       - ./document-parsing:/app
+      - shared-storage:/app/storage
     depends_on:
       - redis
     networks:
@@ -35,9 +42,13 @@ services:
   information-structuring:
     build: ./information-structuring
     ports:
-      - "8003:8000"
+      - "8003:8003"
     environment:
       - ENV=development
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - DOCUMENT_INGESTION_URL=http://document-ingestion:8001
+      - DOCUMENT_PARSING_URL=http://document-parsing:8002
+      - RISK_PREDICTION_URL=http://risk-prediction:8004
     volumes:
       - ./information-structuring:/app
     depends_on:
@@ -49,7 +60,7 @@ services:
   feature-engineering:
     build: ./feature-engineering
     ports:
-      - "8004:8000"
+      - "8004:8004"
     environment:
       - ENV=development
     volumes:
@@ -62,9 +73,11 @@ services:
   risk-prediction:
     build: ./risk-prediction
     ports:
-      - "8005:8000"
+      - "8004:8004"
     environment:
       - ENV=development
+      - DOCUMENT_INGESTION_URL=http://document-ingestion:8001
+      - INFORMATION_STRUCTURING_URL=http://information-structuring:8003
     volumes:
       - ./risk-prediction:/app
     depends_on:
@@ -132,6 +145,7 @@ services:
 volumes:
   postgres_data:
   grafana_data:
+  shared-storage:
 
 networks:
   mammography-network:

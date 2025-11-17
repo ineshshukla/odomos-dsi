@@ -71,8 +71,9 @@ export async function listDocuments(
     },
     created_at: doc.created_at || new Date().toISOString(),
     updated_at: doc.updated_at,
+    upload_timestamp: doc.upload_timestamp || doc.created_at,
     status: mapDocumentStatus(doc.status),
-    clinic: doc.organization || doc.clinic,
+    clinic_name: doc.clinic_name || doc.clinic || doc.organization || 'Unknown Clinic',
     error: doc.error_message || doc.error,
   }))
 
@@ -216,27 +217,49 @@ export async function downloadDocument(documentId: string): Promise<Blob> {
 /**
  * Get risk prediction for a document
  */
-export async function getRiskPrediction(documentId: string): Promise<PredictionResult> {
-  const response = await fetch(
-    `${API_CONFIG.RISK_PREDICTION}/predictions/document/${documentId}`,
-    {
-      method: 'GET',
-      headers: {
-        ...getAuthHeaders(),
-        'Content-Type': 'application/json',
-      },
-    }
-  )
+export async function getRiskPrediction(documentId: string, retries = 2): Promise<PredictionResult> {
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), 120000) // 120 second timeout
+  
+  try {
+    const response = await fetch(
+      `${API_CONFIG.RISK_PREDICTION}/predictions/document/${documentId}`,
+      {
+        method: 'GET',
+        headers: {
+          ...getAuthHeaders(),
+          'Content-Type': 'application/json',
+        },
+        signal: controller.signal,
+      }
+    )
 
-  if (!response.ok) {
-    if (response.status === 404) {
-      throw new Error('Prediction not found - document may still be processing')
+    clearTimeout(timeoutId)
+
+    if (!response.ok) {
+      if (response.status === 404) {
+        throw new Error('Prediction not found - document may still be processing')
+      }
+      const error = await response.json().catch(() => ({ detail: 'Failed to fetch prediction' }))
+      throw new Error(error.detail || error.message || 'Failed to fetch prediction')
     }
-    const error = await response.json().catch(() => ({ detail: 'Failed to fetch prediction' }))
-    throw new Error(error.detail || error.message || 'Failed to fetch prediction')
+
+    return response.json()
+  } catch (error: any) {
+    clearTimeout(timeoutId)
+    
+    // Handle network errors and timeouts with retry logic
+    if (error.name === 'AbortError' || error.message.includes('NetworkError') || error.message.includes('Failed to fetch')) {
+      if (retries > 0) {
+        console.log(`Network error fetching prediction for ${documentId}, retrying... (${retries} attempts left)`)
+        await new Promise(resolve => setTimeout(resolve, 2000)) // Wait 2 seconds before retry
+        return getRiskPrediction(documentId, retries - 1)
+      }
+      throw new Error('Prediction service is loading (this may take a minute on first request) - please refresh')
+    }
+    
+    throw error
   }
-
-  return response.json()
 }
 
 /**

@@ -390,18 +390,21 @@ Return only valid JSON, no additional text or explanations.
             
             async with httpx.AsyncClient() as client:
                 response = await client.post(
-                    f"{RISK_PREDICTION_URL}/predictions/predict-internal",
+                    f"{RISK_PREDICTION_URL}/predictions/predict-async",
                     json=payload,
-                    timeout=60.0  # Allow more time for model inference
+                    timeout=10.0  # Fast now that it's async
                 )
                 
                 if response.status_code == 200:
-                    print(f"✅ Risk prediction triggered successfully for document {document_id}")
+                    print(f"✅ Risk prediction queued successfully for document {document_id}")
                 else:
-                    print(f"⚠️  Risk Prediction service returned {response.status_code}")
+                    print(f"⚠️  Risk Prediction service returned {response.status_code} - will retry on next fetch")
                     
         except Exception as e:
+            import traceback
+            error_details = traceback.format_exc()
             print(f"⚠️  Failed to trigger Risk Prediction service: {str(e)}")
+            print(f"Error details: {error_details}")
             # Don't fail the structuring if prediction fails - it can be retried later
     
     def get_structuring_result(self, document_id: str) -> Optional[StructuringResult]:

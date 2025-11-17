@@ -34,6 +34,7 @@ export default function GCFDashboardPage() {
   const [reports, setReports] = useState<ReportRecord[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string>("")
+  const [loadingMessage, setLoadingMessage] = useState("Loading reports...")
 
   const router = useRouter()
   const { user, logout } = useAuth()
@@ -73,65 +74,64 @@ export default function GCFDashboardPage() {
   const loadReports = async () => {
     setIsLoading(true)
     setError("")
+    setLoadingMessage("Loading reports...")
     try {
       // Fetch all documents (GCF coordinators can see all documents)
       const response = await listDocuments(1, 100)
-      
-      // Fetch predictions for each document
-      const reportsWithPredictions = await Promise.all(
-        response.documents.map(async (doc: DocumentStatus) => {
-          let prediction: PredictionResult | null = null
-          let riskScore: "High" | "Medium" | "Low" | "Pending" = "Pending"
-          let riskLevel = "needs_assessment"
-          let predictedBirads = "N/A"
-          let confidence = 0
-          
+      setLoadingMessage(`Preparing ${response.documents.length} reports...`)
+
+      // Render structured reports immediately (no predictions yet)
+      const initialReports: ReportRecord[] = response.documents.map((doc: DocumentStatus) => ({
+        id: doc.upload_id,
+        documentId: doc.upload_id,
+        filename: doc.file_info.filename,
+        clinicName: doc.clinic_name || "Unknown Clinic",
+        submissionDate: new Date(doc.upload_timestamp || doc.created_at).toLocaleDateString(),
+        riskScore: "Pending",
+        riskLevel: "needs_assessment",
+        predictedBirads: "N/A",
+        confidence: 0,
+        reviewStatus: "New",
+      }))
+
+      setReports(initialReports)
+      setIsLoading(false)
+
+      // Fetch predictions asynchronously and update reports as they arrive
+      setLoadingMessage("Fetching predictions in background...")
+      response.documents.forEach((doc: DocumentStatus) => {
+        ;(async () => {
           try {
-            // Only fetch prediction if document is structured
-            if (doc.status === "structured" || doc.status === "predicted") {
-              prediction = await getRiskPrediction(doc.upload_id)
-              
-              if (prediction) {
-                riskLevel = prediction.risk_level
-                predictedBirads = prediction.predicted_birads
-                confidence = prediction.confidence_score
-                
-                // Map risk_level to riskScore
-                switch (prediction.risk_level) {
-                  case "high":
-                    riskScore = "High"
-                    break
-                  case "medium":
-                    riskScore = "Medium"
-                    break
-                  case "low":
-                    riskScore = "Low"
-                    break
-                  default:
-                    riskScore = "Pending"
-                }
+            const prediction = await getRiskPrediction(doc.upload_id)
+            if (!prediction) return
+
+            const riskScore = prediction.risk_level === "high" ? "High" : prediction.risk_level === "medium" ? "Medium" : prediction.risk_level === "low" ? "Low" : "Pending"
+
+            setReports((prev) =>
+              prev.map((r) =>
+                r.documentId === doc.upload_id
+                  ? {
+                      ...r,
+                      riskScore,
+                      riskLevel: prediction.risk_level,
+                      predictedBirads: prediction.predicted_birads,
+                      confidence: prediction.confidence_score,
+                      reviewStatus: (prediction.review_status as any) || r.reviewStatus,
+                    }
+                  : r,
+              ),
+            )
+          } catch (err) {
+            if (err instanceof Error) {
+              if (err.message.includes('loading')) {
+                setLoadingMessage("AI model is initializing (first load may take ~1 minute)...")
+              } else if (!err.message.includes('not found')) {
+                console.error(`Failed to load prediction for document ${doc.upload_id}:`, err)
               }
             }
-          } catch (err) {
-            console.error(`Failed to load prediction for document ${doc.upload_id}:`, err)
           }
-          
-          return {
-            id: doc.upload_id,
-            documentId: doc.upload_id,
-            filename: doc.file_info.filename,
-            clinicName: doc.clinic_name || "Unknown Clinic",
-            submissionDate: new Date(doc.upload_timestamp || doc.created_at).toLocaleDateString(),
-            riskScore,
-            riskLevel,
-            predictedBirads,
-            confidence,
-            reviewStatus: (prediction?.review_status as "New" | "Under Review" | "Follow-up Initiated" | "Review Complete") || "New",
-          }
-        })
-      )
-      
-      setReports(reportsWithPredictions)
+        })()
+      })
     } catch (err) {
       console.error("Failed to load reports:", err)
       setError(err instanceof Error ? err.message : "Failed to load reports")
@@ -334,7 +334,7 @@ export default function GCFDashboardPage() {
                     {isLoading ? (
                       <tr>
                         <td colSpan={7} className="py-8 text-center text-muted-foreground">
-                          Loading reports...
+                          {loadingMessage}
                         </td>
                       </tr>
                     ) : error ? (

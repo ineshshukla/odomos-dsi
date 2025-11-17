@@ -29,9 +29,6 @@ COPY . .
 # Create storage directories
 RUN mkdir -p storage/parsed storage/temp
 
-# Preload OCR models
-RUN python preload_models.py
-
 # Expose port
 EXPOSE 8002
 

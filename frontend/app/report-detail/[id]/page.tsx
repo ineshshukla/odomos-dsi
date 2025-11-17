@@ -45,43 +45,84 @@ export default function ReportDetailPage() {
     try {
       const documentId = params.id as string
       
-      // Fetch all available data in parallel
-      const [document, prediction, parsedText, structuredData] = await Promise.allSettled([
-        getDocument(documentId),
-        getRiskPrediction(documentId),
-        getParsedText(documentId),
-        getStructuredData(documentId)
-      ])
-
-      const reportData: ReportData = {
-        document: document.status === 'fulfilled' ? document.value : null,
-        prediction: prediction.status === 'fulfilled' ? prediction.value : null,
-        parsedText: parsedText.status === 'fulfilled' ? parsedText.value.parsed_text : null,
-        structuredData: structuredData.status === 'fulfilled' ? structuredData.value.structured_data : null,
-        reviewStatus: prediction.status === 'fulfilled' && prediction.value.review_status 
-          ? prediction.value.review_status as any
-          : "New",
-        internalNotes: prediction.status === 'fulfilled' && prediction.value.coordinator_notes 
-          ? prediction.value.coordinator_notes 
-          : ""
+      // First, try to get the document (this should always work)
+      let document: DocumentStatus | null = null
+      try {
+        document = await getDocument(documentId)
+      } catch (err) {
+        console.error("Failed to fetch document:", err)
+        throw new Error("Document not found")
       }
 
-      console.log("📊 Report Data loaded:", {
-        hasDocument: !!reportData.document,
-        hasPrediction: !!reportData.prediction,
-        hasParsedText: !!reportData.parsedText,
-        hasStructuredData: !!reportData.structuredData,
-        structuredData: reportData.structuredData
-      })
+      // Initialize report with document only
+      const reportData: ReportData = {
+        document: document,
+        prediction: null,
+        parsedText: null,
+        structuredData: null,
+        reviewStatus: "New",
+        internalNotes: ""
+      }
 
+      // Set initial state so page renders with document info
       setReport(reportData)
-      setReviewStatus(reportData.reviewStatus)
-      setInternalNotes(reportData.internalNotes)
-      
+      setIsLoading(false)
+
+      // Now fetch other data in background (non-blocking)
+      // Parsed text
+      getParsedText(documentId)
+        .then(result => {
+          setReport(prev => prev ? { ...prev, parsedText: result.parsed_text } : prev)
+        })
+        .catch(err => console.log("Parsed text not available:", err.message))
+
+      // Structured data
+      getStructuredData(documentId)
+        .then(result => {
+          setReport(prev => prev ? { ...prev, structuredData: result.structured_data } : prev)
+        })
+        .catch(err => console.log("Structured data not available:", err.message))
+
+      // Prediction (with polling if not ready)
+      const fetchPrediction = async () => {
+        try {
+          const prediction = await getRiskPrediction(documentId)
+          setReport(prev => prev ? {
+            ...prev,
+            prediction: prediction,
+            reviewStatus: prediction.review_status as any || "New",
+            internalNotes: prediction.coordinator_notes || ""
+          } : prev)
+          setReviewStatus(prediction.review_status as any || "New")
+          setInternalNotes(prediction.coordinator_notes || "")
+          return true
+        } catch (err) {
+          console.log("Prediction not available yet:", err instanceof Error ? err.message : err)
+          return false
+        }
+      }
+
+      // Try to get prediction immediately
+      const gotPrediction = await fetchPrediction()
+
+      // If no prediction, poll for it
+      if (!gotPrediction) {
+        let attempts = 0
+        const maxAttempts = 24 // 2 minutes (5s interval)
+        
+        const pollInterval = setInterval(async () => {
+          attempts++
+          const success = await fetchPrediction()
+          
+          if (success || attempts >= maxAttempts) {
+            clearInterval(pollInterval)
+          }
+        }, 5000)
+      }
+
     } catch (err) {
       console.error("Failed to load report details:", err)
       setError(err instanceof Error ? err.message : "Failed to load report details")
-    } finally {
       setIsLoading(false)
     }
   }
@@ -93,7 +134,7 @@ export default function ReportDetailPage() {
       setIsLoading(true)
       setError("")
       
-      // Call the API to update review status
+      // Call the API to update review status (will create prediction record if needed)
       const updatedPrediction = await updateReviewStatus(
         report.document.upload_id,
         reviewStatus,
@@ -120,7 +161,7 @@ export default function ReportDetailPage() {
       
     } catch (err) {
       console.error("Failed to save changes:", err)
-      setError(err instanceof Error ? err.message : "Failed to save changes")
+      setError(err instanceof Error ? err.message : "Failed to save changes. Prediction may not be ready yet.")
     } finally {
       setIsLoading(false)
     }
@@ -374,7 +415,7 @@ export default function ReportDetailPage() {
           {/* Right Column - Risk Assessment & Review */}
           <div className="space-y-6">
             {/* AI Risk Assessment Card */}
-            {report.prediction && (
+            {report.prediction ? (
               <Card className="card-glow border-primary/20 dark:bg-card/80 dark:backdrop-blur-sm">
                 <CardHeader className="bg-primary/5">
                   <CardTitle className="flex items-center gap-2 text-foreground">
@@ -423,6 +464,22 @@ export default function ReportDetailPage() {
                     <p className="text-xs text-muted-foreground">
                       Analyzed: {new Date(report.prediction.created_at).toLocaleString()}
                     </p>
+                  </div>
+                </CardContent>
+              </Card>
+            ) : (
+              <Card className="card-glow border-blue-500/20 dark:bg-card/80 dark:backdrop-blur-sm">
+                <CardHeader className="bg-blue-500/5">
+                  <CardTitle className="flex items-center gap-2 text-foreground">
+                    <Loader2 className="w-5 h-5 text-blue-500 animate-spin" />
+                    AI Risk Assessment
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4 pt-6">
+                  <div className="text-center py-8">
+                    <p className="text-muted-foreground mb-2">Risk prediction is being processed...</p>
+                    <p className="text-sm text-muted-foreground">This may take 1-2 minutes on first use</p>
+                    <p className="text-sm text-blue-500 mt-4">Page will auto-update when ready</p>
                   </div>
                 </CardContent>
               </Card>
