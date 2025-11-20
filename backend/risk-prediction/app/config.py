@@ -3,6 +3,10 @@ Risk Prediction Service Configuration
 """
 import os
 from pathlib import Path
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv(os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env"))
 
 # Service Configuration
 SERVICE_NAME = "risk-prediction"
@@ -16,6 +20,17 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # Set USE_HUGGINGFACE_MODEL=false to use local model instead
 HUGGINGFACE_MODEL_REPO = os.getenv("HUGGINGFACE_MODEL_REPO", "ishro/biogpt-aura")
 USE_HUGGINGFACE_MODEL = os.getenv("USE_HUGGINGFACE_MODEL", "true").lower() == "true"
+
+# Optionally use Hugging Face Inference API instead of downloading the model
+# Set USE_HF_INFERENCE_API=true and provide HUGGINGFACE_API_TOKEN to call
+# the hosted model via the Hugging Face Inference endpoint.
+USE_HF_INFERENCE_API = os.getenv("USE_HF_INFERENCE_API", "false").lower() == "true"
+HUGGINGFACE_API_TOKEN = os.getenv("HUGGINGFACE_API_TOKEN", "")
+
+# Optionally use Hugging Face Space (Gradio) for inference
+# Set USE_HF_SPACE=true and provide HF_SPACE_NAME (e.g., "ishro/biogpt-aura")
+USE_HF_SPACE = os.getenv("USE_HF_SPACE", "false").lower() == "true"
+HF_SPACE_NAME = os.getenv("HF_SPACE_NAME", "ishro/biogpt-aura")
 
 # Local model path (fallback or for local development)
 BACKEND_DIR = BASE_DIR.parent

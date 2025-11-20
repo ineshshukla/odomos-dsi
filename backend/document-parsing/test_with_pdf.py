@@ -25,19 +25,22 @@ def test_with_pdf(pdf_path: str):
     
     try:
         # Test parsing request
+        # Use internal endpoint to bypass auth for testing
+        # Also ensure path is correct for inside the container
+        container_file_path = f"/app/{Path(pdf_path).name}"
+        
         payload = {
             "document_id": document_id,
-            "file_path": str(Path(pdf_path).absolute())
+            "file_path": container_file_path
         }
         
         print(f"📤 Sending parsing request...")
         print(f"Document ID: {document_id}")
-        print(f"File path: {pdf_path}")
+        print(f"File path (container): {container_file_path}")
         
         response = requests.post(
-            f"{PARSING_URL}/parsing/parse",
-            json=payload,
-            params={"api_key": API_KEY}
+            f"{PARSING_URL}/parsing/parse-internal",
+            json=payload
         )
         
         if response.status_code == 200:

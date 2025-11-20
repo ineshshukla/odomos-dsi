@@ -1,5 +1,5 @@
 """
-Document parsing service using docling
+Document parsing service using pypdf (lightweight fallback)
 """
 import os
 import httpx
@@ -7,9 +7,10 @@ import asyncio
 from pathlib import Path
 from typing import Optional
 from sqlalchemy.orm import Session
-from docling.document_converter import DocumentConverter, PdfFormatOption
-from docling.datamodel.base_models import InputFormat
-from docling.datamodel.pipeline_options import PdfPipelineOptions
+# from docling.document_converter import DocumentConverter, PdfFormatOption
+# from docling.datamodel.base_models import InputFormat
+# from docling.datamodel.pipeline_options import PdfPipelineOptions
+from pypdf import PdfReader
 
 from app.models.database import ParsingResult
 from app.config import PARSED_DIR, INFORMATION_STRUCTURING_URL, DOCUMENT_INGESTION_URL
@@ -18,39 +19,21 @@ from app.config import PARSED_DIR, INFORMATION_STRUCTURING_URL, DOCUMENT_INGESTI
 _converter_instance = None
 
 def get_converter():
-    """Get or create singleton DocumentConverter instance with optimized settings"""
-    global _converter_instance
-    if _converter_instance is None:
-        print("🔧 Initializing DocumentConverter with highly optimized settings...")
-        
-        # Configure pipeline options for MAXIMUM speed
-        pipeline_options = PdfPipelineOptions()
-        pipeline_options.do_ocr = True  # Keep OCR for scanned documents
-        pipeline_options.do_table_structure = False  # Disable - significant speedup
-        pipeline_options.generate_page_images = False  # Disable - saves memory & time
-        pipeline_options.generate_picture_images = False  # Disable - saves memory & time
-        pipeline_options.images_scale = 1.0  # Don't upscale images
-        
-        # Create converter with optimized options
-        _converter_instance = DocumentConverter(
-            format_options={
-                InputFormat.PDF: PdfFormatOption(
-                    pipeline_options=pipeline_options
-                )
-            }
-        )
-        print("✅ DocumentConverter ready with maximum optimizations for speed")
-    return _converter_instance
+    """
+    Dummy converter getter since we are using pypdf now.
+    Kept for compatibility if we switch back to docling later.
+    """
+    return None
 
 class DocumentParsingService:
-    """Service for parsing documents using docling"""
+    """Service for parsing documents using pypdf"""
     
     def __init__(self, db: Session):
         self.db = db
         self.converter = get_converter()
     
     async def parse_document(self, document_id: str, file_path: str) -> ParsingResult:
-        """Parse document using docling with granular progress tracking"""
+        """Parse document using pypdf with granular progress tracking"""
         import time
         start_time = time.time()
         
@@ -69,14 +52,17 @@ class DocumentParsingService:
             file_size_mb = os.path.getsize(file_path) / (1024 * 1024)
             print(f"   File type: {file_extension}, Size: {file_size_mb:.2f} MB")
             
+            extracted_text = ""
+            
             if file_extension == '.txt':
                 # For text files, just read the content directly (fast)
                 await self.update_parsing_progress(document_id, "processing", 50, "Reading text file...")
                 with open(file_path, 'r', encoding='utf-8') as f:
                     extracted_text = f.read()
                 await self.update_parsing_progress(document_id, "processing", 90, "Text extracted")
-            else:
-                # For other files (PDF, DOCX, images), use docling
+            
+            elif file_extension == '.pdf':
+                # For PDF files, use pypdf
                 await self.update_parsing_progress(document_id, "processing", 15, "Loading PDF...")
                 
                 # Run conversion in executor to avoid blocking
@@ -85,18 +71,20 @@ class DocumentParsingService:
                     loop = asyncio.get_event_loop()
                     
                     # Update progress during conversion
-                    await self.update_parsing_progress(document_id, "processing", 30, "Analyzing document structure...")
+                    await self.update_parsing_progress(document_id, "processing", 30, "Extracting text from PDF...")
                     
-                    result = await loop.run_in_executor(
+                    extracted_text = await loop.run_in_executor(
                         executor,
                         self._convert_document,
                         file_path,
                         document_id
                     )
                 
-                await self.update_parsing_progress(document_id, "processing", 75, "Extracting text content...")
-                extracted_text = result.document.export_to_markdown()
                 await self.update_parsing_progress(document_id, "processing", 85, "Cleaning extracted text...")
+            
+            else:
+                # Fallback for other types (not supported by pypdf)
+                raise ValueError(f"Unsupported file type for lightweight parsing: {file_extension}")
             
             # Log extraction stats
             elapsed = time.time() - start_time
@@ -185,15 +173,29 @@ class DocumentParsingService:
             
             raise e
     
-    def _convert_document(self, file_path: str, document_id: str = None):
-        """Synchronous conversion method for executor with progress logging"""
+    def _convert_document(self, file_path: str, document_id: str = None) -> str:
+        """Synchronous conversion method using pypdf"""
         import time
         start = time.time()
-        print(f"   🔄 Converting document...")
-        result = self.converter.convert(file_path)
+        print(f"   🔄 Converting document with pypdf...")
+        
+        text_content = []
+        try:
+            reader = PdfReader(file_path)
+            for i, page in enumerate(reader.pages):
+                text = page.extract_text()
+                if text:
+                    text_content.append(text)
+                print(f"      Extracted page {i+1}/{len(reader.pages)}")
+        except Exception as e:
+            print(f"      Error reading PDF: {e}")
+            raise e
+            
+        full_text = "\n\n".join(text_content)
+        
         elapsed = time.time() - start
-        print(f"   ⏱️  Docling conversion took {elapsed:.2f}s")
-        return result
+        print(f"   ⏱️  pypdf conversion took {elapsed:.2f}s")
+        return full_text
     
     async def update_parsing_progress(self, document_id: str, status: str, progress: int, message: str = None):
         """Update parsing progress in database with optional message"""

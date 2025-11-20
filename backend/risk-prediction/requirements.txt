@@ -22,6 +22,9 @@ python-jose[cryptography]==3.3.0
 # HTTP client for service communication
 httpx>=0.25.2
 
+# Gradio Client for HF Spaces
+gradio_client>=0.8.0
+
 # Utilities
 python-dotenv>=1.0.0
 tqdm>=4.65.0
