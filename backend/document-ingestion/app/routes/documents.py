@@ -1,7 +1,9 @@
 """
 Document routes for file upload and management
 """
-from typing import Optional
+import zipfile
+import io
+from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query
 from sqlalchemy.orm import Session
 
@@ -19,15 +21,15 @@ from app.utils.auth_middleware import get_clinic_admin, get_any_user
 
 router = APIRouter(prefix="/documents", tags=["documents"])
 
-@router.post("/upload", response_model=UploadResponse)
+@router.post("/upload")
 async def upload_document(
-    file: UploadFile = File(..., description="Document file to upload"),
+    file: UploadFile = File(..., description="Document file to upload (PDF, DICOM, or ZIP)"),
     patient_id: Optional[str] = Form(None, description="Patient ID (optional)"),
     description: Optional[str] = Form(None, description="Description of the document"),
     current_user: dict = Depends(get_clinic_admin),
     db: Session = Depends(get_db)
 ):
-    """Upload a mammography report document (Clinic Admin only)"""
+    """Upload a mammography report document or ZIP file containing multiple reports (Clinic Admin only)"""
     
     try:
         # Validate file
@@ -47,35 +49,224 @@ async def upload_document(
         # Get clinic/organization name from JWT token
         clinic_name = current_user.get("organization", "Unknown Clinic")
         
-        # Upload document
         document_service = DocumentService(db)
-        document = await document_service.upload_document(
-            file_content=file_content,
-            filename=file.filename,
-            content_type=mime_type,
-            metadata=metadata,
-            clinic_name=clinic_name
-        )
         
-        # Create response
-        file_info = FileInfo(
-            filename=document.original_filename,
-            size=document.file_size,
-            content_type=document.content_type
-        )
+        # Check if it's a ZIP file
+        if mime_type == "application/zip" or mime_type in ["application/x-zip-compressed", "application/x-zip"]:
+            # Handle ZIP file - extract and process all PDFs
+            pdf_files = []
+            try:
+                with zipfile.ZipFile(io.BytesIO(file_content), 'r') as zip_ref:
+                    # Get list of PDF files in the zip
+                    pdf_names = [name for name in zip_ref.namelist() 
+                                if name.lower().endswith('.pdf') and not name.startswith('__MACOSX')]
+                    
+                    if not pdf_names:
+                        raise HTTPException(
+                            status_code=400, 
+                            detail="No PDF files found in the ZIP archive"
+                        )
+                    
+                    # Extract each PDF
+                    for pdf_name in pdf_names:
+                        try:
+                            # Read PDF content from zip
+                            pdf_content = zip_ref.read(pdf_name)
+                            
+                            # Get just the filename (remove directory path if present)
+                            filename = pdf_name.split('/')[-1]
+                            
+                            # Skip hidden files and system files
+                            if filename.startswith('.') or filename.startswith('_'):
+                                continue
+                            
+                            pdf_files.append((pdf_content, filename, "application/pdf"))
+                            
+                        except Exception as e:
+                            print(f"⚠️  Warning: Could not extract {pdf_name}: {str(e)}")
+                            continue
+                    
+            except zipfile.BadZipFile:
+                raise HTTPException(status_code=400, detail="Invalid or corrupted ZIP file")
+            
+            if not pdf_files:
+                raise HTTPException(
+                    status_code=400, 
+                    detail="No valid documents found in ZIP file"
+                )
+            
+            # Upload all documents
+            documents = await document_service.upload_documents_bulk(
+                files_data=pdf_files,
+                metadata=metadata,
+                clinic_name=clinic_name
+            )
+            
+            # Return list of uploaded documents
+            uploaded_documents = []
+            for document in documents:
+                file_info = FileInfo(
+                    filename=document.original_filename,
+                    size=document.file_size,
+                    content_type=document.content_type
+                )
+                
+                uploaded_documents.append(UploadResponse(
+                    upload_id=document.id,
+                    status=document.status,
+                    file_info=file_info,
+                    created_at=document.created_at,
+                    message="Document uploaded successfully"
+                ))
+            
+            return uploaded_documents
         
-        return UploadResponse(
-            upload_id=document.id,
-            status=document.status,
-            file_info=file_info,
-            created_at=document.created_at,
-            message="Document uploaded successfully"
-        )
+        else:
+            # Handle single file upload (PDF, DICOM, etc.)
+            document = await document_service.upload_document(
+                file_content=file_content,
+                filename=file.filename,
+                content_type=mime_type,
+                metadata=metadata,
+                clinic_name=clinic_name
+            )
+            
+            # Create response
+            file_info = FileInfo(
+                filename=document.original_filename,
+                size=document.file_size,
+                content_type=document.content_type
+            )
+            
+            return UploadResponse(
+                upload_id=document.id,
+                status=document.status,
+                file_info=file_info,
+                created_at=document.created_at,
+                message="Document uploaded successfully"
+            )
         
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
+
+@router.post("/upload-zip")
+async def upload_zip_batch(
+    file: UploadFile = File(..., description="ZIP file containing multiple PDFs"),
+    patient_id: Optional[str] = Form(None, description="Patient ID (optional)"),
+    description: Optional[str] = Form(None, description="Description of the documents"),
+    current_user: dict = Depends(get_clinic_admin),
+    db: Session = Depends(get_db)
+):
+    """
+    Upload a ZIP file containing multiple mammography reports (Clinic Admin only)
+    Extracts and processes all PDFs in parallel for efficiency
+    """
+    
+    try:
+        # Validate zip file
+        if not file.filename or not file.filename.lower().endswith('.zip'):
+            raise HTTPException(status_code=400, detail="File must be a ZIP archive")
+        
+        # Validate file size (larger limit for zip)
+        mime_type, _ = validate_upload_file(file, is_zip=True)
+        
+        # Read zip file content
+        zip_content = await file.read()
+        
+        # Extract PDF files from zip
+        pdf_files = []
+        try:
+            with zipfile.ZipFile(io.BytesIO(zip_content), 'r') as zip_ref:
+                # Get list of PDF files in the zip
+                pdf_names = [name for name in zip_ref.namelist() 
+                            if name.lower().endswith('.pdf') and not name.startswith('__MACOSX')]
+                
+                if not pdf_names:
+                    raise HTTPException(
+                        status_code=400, 
+                        detail="No PDF files found in the ZIP archive"
+                    )
+                
+                print(f"📦 Extracting {len(pdf_names)} PDF files from ZIP")
+                
+                # Extract each PDF
+                for pdf_name in pdf_names:
+                    try:
+                        # Read PDF content from zip
+                        pdf_content = zip_ref.read(pdf_name)
+                        
+                        # Get just the filename (remove directory path if present)
+                        filename = pdf_name.split('/')[-1]
+                        
+                        # Skip hidden files and system files
+                        if filename.startswith('.') or filename.startswith('_'):
+                            continue
+                        
+                        pdf_files.append((pdf_content, filename, "application/pdf"))
+                        
+                    except Exception as e:
+                        print(f"⚠️  Warning: Could not extract {pdf_name}: {str(e)}")
+                        continue
+                
+        except zipfile.BadZipFile:
+            raise HTTPException(status_code=400, detail="Invalid or corrupted ZIP file")
+        
+        if not pdf_files:
+            raise HTTPException(
+                status_code=400, 
+                detail="No valid PDF files could be extracted from the ZIP archive"
+            )
+        
+        print(f"✅ Successfully extracted {len(pdf_files)} PDF files")
+        
+        # Create metadata
+        from app.models.schemas import UploadMetadata
+        metadata = UploadMetadata(
+            uploader_id=current_user["sub"],
+            patient_id=patient_id,
+            description=description
+        )
+        
+        # Get clinic/organization name from JWT token
+        clinic_name = current_user.get("organization", "Unknown Clinic")
+        
+        # Upload all documents in bulk (processes in parallel)
+        document_service = DocumentService(db)
+        documents = await document_service.upload_documents_bulk(
+            files_data=pdf_files,
+            metadata=metadata,
+            clinic_name=clinic_name
+        )
+        
+        # Create response with all uploaded documents
+        uploaded_documents = []
+        for document in documents:
+            file_info = FileInfo(
+                filename=document.original_filename,
+                size=document.file_size,
+                content_type=document.content_type
+            )
+            
+            uploaded_documents.append({
+                "upload_id": document.id,
+                "status": document.status,
+                "file_info": file_info,
+                "created_at": document.created_at
+            })
+        
+        return {
+            "message": f"Successfully uploaded {len(documents)} documents from ZIP file",
+            "total_documents": len(documents),
+            "documents": uploaded_documents
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Zip upload error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Zip upload failed: {str(e)}")
 
 @router.get("/{document_id}", response_model=DocumentStatus)
 async def get_document_status(

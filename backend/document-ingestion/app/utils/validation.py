@@ -10,14 +10,17 @@ except (ImportError, OSError):
 from pathlib import Path
 from typing import Tuple, Optional
 from fastapi import UploadFile, HTTPException
-from app.config import MAX_FILE_SIZE, ALLOWED_EXTENSIONS, ALLOWED_MIME_TYPES
+from app.config import MAX_FILE_SIZE, MAX_ZIP_SIZE, ALLOWED_EXTENSIONS, ALLOWED_MIME_TYPES
 
 def validate_file_size(file: UploadFile) -> None:
     """Validate file size"""
-    if file.size and file.size > MAX_FILE_SIZE:
+    # Auto-detect if it's a ZIP file for size validation
+    is_zip = file.filename and file.filename.lower().endswith('.zip')
+    max_size = MAX_ZIP_SIZE if is_zip else MAX_FILE_SIZE
+    if file.size and file.size > max_size:
         raise HTTPException(
             status_code=413,
-            detail=f"File too large. Maximum size allowed: {MAX_FILE_SIZE / (1024*1024):.1f}MB"
+            detail=f"File too large. Maximum size allowed: {max_size / (1024*1024):.1f}MB"
         )
 
 def validate_file_extension(filename: str) -> None:
@@ -41,6 +44,13 @@ def validate_file_content(file: UploadFile) -> Tuple[str, str]:
         # Detect MIME type using libmagic
         mime_type = magic.from_buffer(content, mime=True)
         
+        # Special handling for ZIP files which might be detected as generic binary or other types
+        is_zip = file.filename and file.filename.lower().strip().endswith('.zip')
+        if is_zip and (mime_type == 'application/octet-stream' or mime_type not in ALLOWED_MIME_TYPES):
+             # Check for ZIP file signature (PK\x03\x04 or PK\x05\x06)
+             if content[:4] in (b'PK\x03\x04', b'PK\x05\x06', b'PK\x07\x08'):
+                 mime_type = "application/zip"
+        
         if mime_type not in ALLOWED_MIME_TYPES:
             raise HTTPException(
                 status_code=400,
@@ -56,6 +66,8 @@ def validate_file_content(file: UploadFile) -> Tuple[str, str]:
                 mime_type = "image/jpeg"
             elif file.filename.lower().endswith('.png'):
                 mime_type = "image/png"
+            elif file.filename.lower().endswith('.zip'):
+                mime_type = "application/zip"
     
     return mime_type, content
 

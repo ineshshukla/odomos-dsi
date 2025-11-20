@@ -18,13 +18,16 @@ DATABASE_URL = f"sqlite:///{BASE_DIR}/database.db"
 
 # File upload settings
 MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
-ALLOWED_EXTENSIONS = {".pdf", ".docx", ".png", ".jpg", ".jpeg", ".tiff", ".tif"}
+MAX_ZIP_SIZE = 100 * 1024 * 1024  # 100MB for zip files
+ALLOWED_EXTENSIONS = {".pdf", ".docx", ".png", ".jpg", ".jpeg", ".tiff", ".tif", ".zip"}
 ALLOWED_MIME_TYPES = {
     "application/pdf",
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     "image/png",
     "image/jpeg",
-    "image/tiff"
+    "image/tiff",
+    "application/zip",
+    "application/x-zip-compressed"
 }
 
 # API settings
@@ -42,6 +45,16 @@ LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 # Service URLs (for inter-service communication)
 DOCUMENT_PARSING_URL = os.getenv("DOCUMENT_PARSING_URL", "http://localhost:8002")
 INFORMATION_STRUCTURING_URL = os.getenv("INFORMATION_STRUCTURING_URL", "http://localhost:8003")
+
+# Batch processing settings for large uploads
+MAX_CONCURRENT_PARSING = int(os.getenv("MAX_CONCURRENT_PARSING", "5"))  # Max parallel parsing requests
+BATCH_SIZE = int(os.getenv("BATCH_SIZE", "10"))  # Documents per batch
+BATCH_DELAY = float(os.getenv("BATCH_DELAY", "2.0"))  # Seconds between batches
+
+# Retry settings
+MAX_RETRIES = int(os.getenv("MAX_RETRIES", "3"))
+RETRY_DELAY = float(os.getenv("RETRY_DELAY", "5.0"))  # Initial retry delay in seconds
+RETRY_BACKOFF = float(os.getenv("RETRY_BACKOFF", "2.0"))  # Exponential backoff multiplier
 
 # Create directories if they don't exist
 def create_directories():

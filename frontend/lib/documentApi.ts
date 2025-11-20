@@ -16,9 +16,9 @@ function getAuthHeaders(): HeadersInit {
 }
 
 /**
- * Upload a document file
+ * Upload a document file (supports PDF, DICOM, or ZIP containing multiple PDFs)
  */
-export async function uploadDocument(file: File): Promise<UploadDocumentResponse> {
+export async function uploadDocument(file: File): Promise<UploadDocumentResponse | UploadDocumentResponse[]> {
   const formData = new FormData()
   formData.append('file', file)
 
@@ -31,6 +31,31 @@ export async function uploadDocument(file: File): Promise<UploadDocumentResponse
   if (!response.ok) {
     const error = await response.json().catch(() => ({ detail: 'Upload failed' }))
     throw new Error(error.detail || error.message || 'Failed to upload document')
+  }
+
+  return response.json()
+}
+
+/**
+ * Upload a ZIP file containing multiple documents
+ */
+export async function uploadZipFile(file: File): Promise<{
+  message: string
+  total_documents: number
+  documents: UploadDocumentResponse[]
+}> {
+  const formData = new FormData()
+  formData.append('file', file)
+
+  const response = await fetch(`${API_CONFIG.DOCUMENT_INGESTION}/documents/upload-zip`, {
+    method: 'POST',
+    headers: getAuthHeaders(),
+    body: formData,
+  })
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Zip upload failed' }))
+    throw new Error(error.detail || error.message || 'Failed to upload zip file')
   }
 
   return response.json()

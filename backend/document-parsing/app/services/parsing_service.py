@@ -1,5 +1,4 @@
-"""
-Document parsing service using docling
+"""Document parsing service using docling with fallback parsers
 """
 import os
 import httpx
@@ -10,6 +9,8 @@ from sqlalchemy.orm import Session
 from docling.document_converter import DocumentConverter, PdfFormatOption
 from docling.datamodel.base_models import InputFormat
 from docling.datamodel.pipeline_options import PdfPipelineOptions
+import PyPDF2
+import pdfplumber
 
 from app.models.database import ParsingResult
 from app.config import PARSED_DIR, INFORMATION_STRUCTURING_URL, DOCUMENT_INGESTION_URL
@@ -76,27 +77,8 @@ class DocumentParsingService:
                     extracted_text = f.read()
                 await self.update_parsing_progress(document_id, "processing", 90, "Text extracted")
             else:
-                # For other files (PDF, DOCX, images), use docling
-                await self.update_parsing_progress(document_id, "processing", 15, "Loading PDF...")
-                
-                # Run conversion in executor to avoid blocking
-                import concurrent.futures
-                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-                    loop = asyncio.get_event_loop()
-                    
-                    # Update progress during conversion
-                    await self.update_parsing_progress(document_id, "processing", 30, "Analyzing document structure...")
-                    
-                    result = await loop.run_in_executor(
-                        executor,
-                        self._convert_document,
-                        file_path,
-                        document_id
-                    )
-                
-                await self.update_parsing_progress(document_id, "processing", 75, "Extracting text content...")
-                extracted_text = result.document.export_to_markdown()
-                await self.update_parsing_progress(document_id, "processing", 85, "Cleaning extracted text...")
+                # For other files (PDF, DOCX, images), use multi-tier parsing strategy
+                extracted_text = await self._parse_with_fallback(document_id, file_path)
             
             # Log extraction stats
             elapsed = time.time() - start_time
@@ -184,6 +166,113 @@ class DocumentParsingService:
             print(f"   Traceback: {traceback.format_exc()}")
             
             raise e
+    
+    async def _parse_with_fallback(self, document_id: str, file_path: str) -> str:
+        """Multi-tier parsing strategy with fallback parsers for robust handling"""
+        import concurrent.futures
+        import time
+        
+        # Strategy 1: Try Docling (most feature-rich, best quality)
+        try:
+            await self.update_parsing_progress(document_id, "processing", 15, "Trying Docling parser...")
+            
+            loop = asyncio.get_event_loop()
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                await self.update_parsing_progress(document_id, "processing", 30, "Analyzing document structure...")
+                result = await loop.run_in_executor(
+                    executor,
+                    self._convert_document,
+                    file_path,
+                    document_id
+                )
+            
+            await self.update_parsing_progress(document_id, "processing", 75, "Extracting text content...")
+            extracted_text = result.document.export_to_markdown()
+            await self.update_parsing_progress(document_id, "processing", 85, "Text extracted successfully")
+            
+            print(f"   ✅ Docling parsing successful")
+            return extracted_text
+            
+        except Exception as e:
+            print(f"   ⚠️  Docling failed: {str(e)[:200]}")
+            print(f"   🔄 Falling back to alternative parsers...")
+        
+        # Strategy 2: Try pdfplumber (good for malformed PDFs, maintains layout)
+        try:
+            await self.update_parsing_progress(document_id, "processing", 40, "Trying pdfplumber parser...")
+            extracted_text = await self._parse_with_pdfplumber(file_path)
+            await self.update_parsing_progress(document_id, "processing", 85, "Text extracted with pdfplumber")
+            
+            if extracted_text and len(extracted_text.strip()) > 100:
+                print(f"   ✅ pdfplumber parsing successful ({len(extracted_text)} chars)")
+                return extracted_text
+            else:
+                raise Exception("pdfplumber extracted insufficient text")
+                
+        except Exception as e:
+            print(f"   ⚠️  pdfplumber failed: {str(e)[:100]}")
+        
+        # Strategy 3: Try PyPDF2 (most permissive, handles broken PDFs)
+        try:
+            await self.update_parsing_progress(document_id, "processing", 55, "Trying PyPDF2 parser...")
+            extracted_text = await self._parse_with_pypdf2(file_path)
+            await self.update_parsing_progress(document_id, "processing", 85, "Text extracted with PyPDF2")
+            
+            if extracted_text and len(extracted_text.strip()) > 50:
+                print(f"   ✅ PyPDF2 parsing successful ({len(extracted_text)} chars)")
+                return extracted_text
+            else:
+                raise Exception("PyPDF2 extracted insufficient text")
+                
+        except Exception as e:
+            print(f"   ⚠️  PyPDF2 failed: {str(e)[:100]}")
+        
+        # All parsers failed
+        raise Exception(
+            "All parsing strategies failed. The PDF may be severely corrupted, encrypted, or contain only images. "
+            "Please ensure the PDF is a valid text-based document."
+        )
+    
+    async def _parse_with_pdfplumber(self, file_path: str) -> str:
+        """Parse PDF using pdfplumber (handles layout-heavy PDFs)"""
+        import concurrent.futures
+        
+        def _extract():
+            text_parts = []
+            with pdfplumber.open(file_path) as pdf:
+                for page_num, page in enumerate(pdf.pages, 1):
+                    page_text = page.extract_text()
+                    if page_text:
+                        text_parts.append(f"\n--- Page {page_num} ---\n")
+                        text_parts.append(page_text)
+            return '\n'.join(text_parts)
+        
+        loop = asyncio.get_event_loop()
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            return await loop.run_in_executor(executor, _extract)
+    
+    async def _parse_with_pypdf2(self, file_path: str) -> str:
+        """Parse PDF using PyPDF2 (most permissive, good for malformed PDFs)"""
+        import concurrent.futures
+        
+        def _extract():
+            text_parts = []
+            with open(file_path, 'rb') as file:
+                reader = PyPDF2.PdfReader(file, strict=False)  # strict=False for malformed PDFs
+                for page_num, page in enumerate(reader.pages, 1):
+                    try:
+                        page_text = page.extract_text()
+                        if page_text:
+                            text_parts.append(f"\n--- Page {page_num} ---\n")
+                            text_parts.append(page_text)
+                    except Exception as e:
+                        print(f"      ⚠️  Page {page_num} extraction failed: {str(e)[:50]}")
+                        continue
+            return '\n'.join(text_parts)
+        
+        loop = asyncio.get_event_loop()
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            return await loop.run_in_executor(executor, _extract)
     
     def _convert_document(self, file_path: str, document_id: str = None):
         """Synchronous conversion method for executor with progress logging"""

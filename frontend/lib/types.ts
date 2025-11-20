@@ -67,8 +67,14 @@ export interface DocumentStatus {
 }
 
 export interface UploadDocumentResponse {
-  document_id: string
-  filename: string
+  upload_id: string
+  status: string
+  file_info: {
+    filename: string
+    size: number
+    content_type: string
+  }
+  created_at: string
   message: string
 }
 

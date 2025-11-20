@@ -7,6 +7,10 @@ uvicorn[standard]>=0.20.0
 # Document parsing - let pip resolve compatible version
 docling
 
+# Fallback PDF parsers for malformed PDFs
+PyPDF2>=3.0.0
+pdfplumber>=0.10.0
+
 # Database
 sqlalchemy>=2.0.0
 

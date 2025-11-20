@@ -11,7 +11,7 @@ import { useRouter } from "next/navigation"
 import { ThemeToggle } from "@/components/theme-toggle"
 import { ProtectedRoute } from "@/components/ProtectedRoute"
 import { useAuth } from "@/contexts/AuthContext"
-import { uploadDocument, listDocuments, deleteDocument } from "@/lib/documentApi"
+import { uploadDocument, uploadZipFile, listDocuments, deleteDocument } from "@/lib/documentApi"
 import type { DocumentStatus } from "@/lib/types"
 
 export default function ClinicPortalPage() {
@@ -19,6 +19,7 @@ export default function ClinicPortalPage() {
   const [isUploading, setIsUploading] = useState(false)
   const [uploadProgress, setUploadProgress] = useState(0)
   const [showSuccess, setShowSuccess] = useState(false)
+  const [uploadedCount, setUploadedCount] = useState(0)
   const [documents, setDocuments] = useState<DocumentStatus[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string>("")
@@ -58,26 +59,42 @@ export default function ClinicPortalPage() {
     setUploadProgress(0)
     setShowSuccess(false)
     setError("")
+    setUploadedCount(0)
 
     try {
-      // Simulate progress
+      // Check if file is a zip
+      const isZip = file.name.toLowerCase().endsWith('.zip')
+      
+      // Start progress animation
       const progressInterval = setInterval(() => {
-        setUploadProgress((prev) => Math.min(prev + 10, 90))
-      }, 100)
+        setUploadProgress((prev) => Math.min(prev + (isZip ? 5 : 10), 90))
+      }, isZip ? 200 : 100)
 
-      // Upload file
+      // Upload file (backend automatically handles ZIP extraction)
       const response = await uploadDocument(file)
       
       clearInterval(progressInterval)
       setUploadProgress(100)
+      
+      // Handle response - could be single object or array for ZIP files
+      if (Array.isArray(response)) {
+        // ZIP file response - array of documents
+        setUploadedCount(response.length)
+        console.log(`✅ Uploaded ${response.length} documents from ZIP file`)
+      } else {
+        // Single file response
+        setUploadedCount(1)
+        console.log(`✅ Uploaded document: ${response.file_info.filename}`)
+      }
+      
       setIsUploading(false)
       setShowSuccess(true)
 
       // Reload documents list
       await loadDocuments()
 
-      // Hide success message after 3 seconds
-      setTimeout(() => setShowSuccess(false), 3000)
+      // Hide success message after appropriate time
+      setTimeout(() => setShowSuccess(false), isZip ? 5000 : 3000)
     } catch (err) {
       console.error("Upload failed:", err)
       setError(err instanceof Error ? err.message : "Upload failed")
@@ -259,7 +276,16 @@ export default function ClinicPortalPage() {
                     <div className="w-16 h-16 mx-auto bg-success/10 rounded-full flex items-center justify-center">
                       <CheckCircle className="w-8 h-8 text-success" />
                     </div>
-                    <p className="text-success font-medium text-lg">Upload successful!</p>
+                    <p className="text-success font-medium text-lg">
+                      {uploadedCount > 1 
+                        ? `Successfully uploaded ${uploadedCount} documents!` 
+                        : "Upload successful!"}
+                    </p>
+                    {uploadedCount > 1 && (
+                      <p className="text-sm text-muted-foreground">
+                        All documents are now being processed in parallel
+                      </p>
+                    )}
                   </div>
                 ) : (
                   <div className="space-y-4">
@@ -268,11 +294,11 @@ export default function ClinicPortalPage() {
                     </div>
                     <div>
                       <p className="text-lg font-medium text-foreground mb-2">Drag & Drop Report Files Here</p>
-                      <p className="text-muted-foreground mb-4">Supported formats: PDF, DICOM</p>
+                      <p className="text-muted-foreground mb-4">Supported formats: PDF, ZIP (for multiple PDFs)</p>
                       <div className="relative">
                         <input
                           type="file"
-                          accept=".pdf,.dcm"
+                          accept=".pdf,.dcm,.zip"
                           onChange={handleFileSelect}
                           className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
                         />
@@ -283,6 +309,9 @@ export default function ClinicPortalPage() {
                           Or Browse Files
                         </Button>
                       </div>
+                      <p className="text-xs text-muted-foreground mt-2">
+                        💡 Upload a ZIP file to process multiple reports at once
+                      </p>
                     </div>
                   </div>
                 )}

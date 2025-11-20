@@ -4,6 +4,7 @@ Information structuring service using Google Gemini API
 import json
 import time
 import httpx
+import asyncio
 from typing import Dict, Any, Optional
 from sqlalchemy.orm import Session
 
@@ -14,8 +15,17 @@ from app.config import (
     GEMINI_API_URL, 
     RESULTS_DIR, 
     DOCUMENT_INGESTION_URL, 
-    RISK_PREDICTION_URL
+    RISK_PREDICTION_URL,
+    GEMINI_MAX_CONCURRENT,
+    GEMINI_RATE_LIMIT_DELAY,
+    GEMINI_MAX_RETRIES,
+    GEMINI_RETRY_DELAY
 )
+
+# Global semaphore to limit concurrent API calls across all instances
+_gemini_semaphore = asyncio.Semaphore(GEMINI_MAX_CONCURRENT)
+_last_api_call_time = 0
+_api_call_lock = asyncio.Lock()
 
 class InformationStructuringService:
     """Service for structuring mammography reports using Gemini API"""
@@ -104,67 +114,101 @@ class InformationStructuringService:
                 return error_result
     
     async def extract_structured_data(self, text: str) -> StructuredData:
-        """Extract structured data using Gemini API"""
+        """Extract structured data using Gemini API with rate limiting and retries"""
         if not self.api_key:
             # Use mock data when API key is not configured
             print("⚠️  GEMINI_API_KEY not configured - using mock structured data")
             return self.create_mock_structured_data(text)
         
-        try:
-            prompt = self.create_prompt(text)
-            
-            async with httpx.AsyncClient() as client:
-                response = await client.post(
-                    self.api_url,
-                    params={"key": self.api_key},
-                    json={
-                        "contents": [{
-                            "parts": [{"text": prompt}]
-                        }],
-                        "generationConfig": {
-                            "temperature": 0.1,
-                            "topK": 1,
-                            "topP": 0.8,
-                            "maxOutputTokens": 2048,
-                        }
-                    },
-                    timeout=60.0
-                )
-                
-                if response.status_code != 200:
-                    # Fallback to mock data on API error
-                    print(f"⚠️  Gemini API error: {response.status_code} - falling back to mock data")
-                    return self.create_mock_structured_data(text)
-                
-                result = response.json()
-                
-                if "candidates" not in result or not result["candidates"]:
-                    print("⚠️  No response from Gemini API - falling back to mock data")
-                    return self.create_mock_structured_data(text)
-                
-                content = result["candidates"][0]["content"]["parts"][0]["text"]
-                
-                # Parse JSON response
-                try:
-                    # Extract JSON from response (in case there's extra text)
-                    json_start = content.find('{')
-                    json_end = content.rfind('}') + 1
-                    if json_start != -1 and json_end != 0:
-                        json_str = content[json_start:json_end]
-                        data = json.loads(json_str)
-                    else:
-                        raise ValueError("No JSON found in response")
+        # Retry loop with exponential backoff
+        for attempt in range(GEMINI_MAX_RETRIES):
+            try:
+                # Apply rate limiting
+                async with _gemini_semaphore:  # Limit concurrent calls
+                    # Ensure minimum delay between API calls
+                    global _last_api_call_time
+                    async with _api_call_lock:
+                        current_time = time.time()
+                        time_since_last_call = current_time - _last_api_call_time
+                        if time_since_last_call < GEMINI_RATE_LIMIT_DELAY:
+                            wait_time = GEMINI_RATE_LIMIT_DELAY - time_since_last_call
+                            await asyncio.sleep(wait_time)
+                        _last_api_call_time = time.time()
                     
-                    return StructuredData(**data)
+                    prompt = self.create_prompt(text)
                     
-                except (json.JSONDecodeError, ValueError) as e:
-                    print(f"⚠️  Failed to parse Gemini response - falling back to mock data: {str(e)}")
+                    async with httpx.AsyncClient() as client:
+                        response = await client.post(
+                            self.api_url,
+                            params={"key": self.api_key},
+                            json={
+                                "contents": [{
+                                    "parts": [{"text": prompt}]
+                                }],
+                                "generationConfig": {
+                                    "temperature": 0.1,
+                                    "topK": 1,
+                                    "topP": 0.8,
+                                    "maxOutputTokens": 2048,
+                                }
+                            },
+                            timeout=90.0
+                        )
+                        
+                        if response.status_code == 429:  # Rate limited
+                            retry_delay = GEMINI_RETRY_DELAY * (2 ** attempt)
+                            print(f"⚠️  Rate limited by Gemini API, retrying in {retry_delay}s (attempt {attempt + 1}/{GEMINI_MAX_RETRIES})")
+                            await asyncio.sleep(retry_delay)
+                            continue
+                        
+                        if response.status_code != 200:
+                            # Fallback to mock data on API error
+                            print(f"⚠️  Gemini API error: {response.status_code} - falling back to mock data")
+                            return self.create_mock_structured_data(text)
+                
+                        result = response.json()
+                        
+                        if "candidates" not in result or not result["candidates"]:
+                            print("⚠️  No response from Gemini API - falling back to mock data")
+                            return self.create_mock_structured_data(text)
+                        
+                        content = result["candidates"][0]["content"]["parts"][0]["text"]
+                        
+                        # Parse JSON response
+                        try:
+                            # Extract JSON from response (in case there's extra text)
+                            json_start = content.find('{')
+                            json_end = content.rfind('}') + 1
+                            if json_start != -1 and json_end != 0:
+                                json_str = content[json_start:json_end]
+                                data = json.loads(json_str)
+                            else:
+                                raise ValueError("No JSON found in response")
+                            
+                            return StructuredData(**data)
+                            
+                        except (json.JSONDecodeError, ValueError) as e:
+                            print(f"⚠️  Failed to parse Gemini response - falling back to mock data: {str(e)}")
+                            return self.create_mock_structured_data(text)
+                        
+            except (httpx.TimeoutException, httpx.ConnectError) as e:
+                retry_delay = GEMINI_RETRY_DELAY * (2 ** attempt)
+                if attempt < GEMINI_MAX_RETRIES - 1:
+                    print(f"⚠️  Connection error, retrying in {retry_delay}s (attempt {attempt + 1}/{GEMINI_MAX_RETRIES})")
+                    await asyncio.sleep(retry_delay)
+                    continue
+                else:
+                    print(f"⚠️  Failed after {GEMINI_MAX_RETRIES} attempts - falling back to mock data")
                     return self.create_mock_structured_data(text)
                     
-        except Exception as e:
-            # Fallback to mock data on any error
-            print(f"⚠️  Gemini API exception - falling back to mock data: {str(e)}")
-            return self.create_mock_structured_data(text)
+            except Exception as e:
+                # Fallback to mock data on any error
+                print(f"⚠️  Gemini API exception - falling back to mock data: {str(e)}")
+                return self.create_mock_structured_data(text)
+        
+        # All retries exhausted
+        print(f"⚠️  All {GEMINI_MAX_RETRIES} retry attempts exhausted - falling back to mock data")
+        return self.create_mock_structured_data(text)
 
     
     def create_mock_structured_data(self, text: str) -> StructuredData:
