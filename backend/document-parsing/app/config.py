@@ -27,6 +27,10 @@ API_KEY = os.getenv("API_KEY", "demo-api-key-123")
 DOCUMENT_INGESTION_URL = os.getenv("DOCUMENT_INGESTION_URL", "http://localhost:8001")
 INFORMATION_STRUCTURING_URL = os.getenv("INFORMATION_STRUCTURING_URL", "http://localhost:8003")
 
+# Processing limits
+MAX_CONCURRENT_PARSING = int(os.getenv("MAX_CONCURRENT_PARSING", "3"))  # Limit concurrent docling operations
+PARSING_TIMEOUT = int(os.getenv("PARSING_TIMEOUT", "120"))  # Seconds per document
+
 # Logging
 LOG_LEVEL = "INFO"
 LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"

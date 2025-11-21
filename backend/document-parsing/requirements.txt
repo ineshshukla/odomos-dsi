@@ -10,6 +10,10 @@ onnxruntime>=1.16.0
 rapidocr-onnxruntime>=1.3.0
 pypdf>=3.0.0
 
+# Fallback PDF parsers for malformed PDFs
+PyPDF2>=3.0.0
+pdfplumber>=0.10.0
+
 # Database
 sqlalchemy>=2.0.0
 
