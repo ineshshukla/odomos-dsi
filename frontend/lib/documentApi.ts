@@ -69,7 +69,7 @@ export async function listDocuments(
   pageSize: number = 10
 ): Promise<ListDocumentsResponse> {
   const response = await fetch(
-    `${API_CONFIG.DOCUMENT_INGESTION}/documents/?page=${page}&page_size=${pageSize}`,
+    `${API_CONFIG.DOCUMENT_INGESTION}/documents/?page=${page}&limit=${pageSize}`,
     {
       method: 'GET',
       headers: {

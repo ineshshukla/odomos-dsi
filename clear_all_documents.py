@@ -33,10 +33,9 @@ while True:
     
     try:
         response = requests.get(
-            f'{API_BASE_URL}/documents/',
-            params={'page': page, 'page_size': page_size},
+            f"{API_URL}/documents/",
             headers=headers,
-            timeout=10
+            params={'page': page, 'limit': page_size},
         )
         
         if response.status_code != 200:

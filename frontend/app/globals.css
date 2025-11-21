@@ -146,19 +146,19 @@
 /* Custom Medical Theme Styles */
 .risk-high {
   background-color: var(--color-destructive);
-  color: var(--color-destructive-foreground);
+  color: #ffffff;
   box-shadow: 0 0 10px rgba(255, 71, 87, 0.3);
 }
 
 .risk-medium {
   background-color: var(--color-warning);
-  color: var(--color-warning-foreground);
+  color: #ffffff;
   box-shadow: 0 0 10px rgba(255, 165, 2, 0.3);
 }
 
 .risk-low {
   background-color: var(--color-success);
-  color: var(--color-success-foreground);
+  color: #ffffff;
   box-shadow: 0 0 10px rgba(46, 213, 115, 0.3);
 }
 

@@ -33,6 +33,10 @@ export default function GCFDashboardPage() {
   const [searchTerm, setSearchTerm] = useState("")
   const [riskFilter, setRiskFilter] = useState("All")
   const [clinicFilter, setClinicFilter] = useState("All")
+  const [statusFilter, setStatusFilter] = useState("All")
+  const [sortBy, setSortBy] = useState("Date")
+  const [currentPage, setCurrentPage] = useState(1)
+  const itemsPerPage = 10
   const [reports, setReports] = useState<ReportRecord[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string>("")
@@ -165,9 +169,31 @@ export default function GCFDashboardPage() {
       report.documentId.toLowerCase().includes(searchTerm.toLowerCase())
     const matchesRisk = riskFilter === "All" || report.riskScore === riskFilter
     const matchesClinic = clinicFilter === "All" || report.clinicName === clinicFilter
+    const matchesStatus = statusFilter === "All" || report.reviewStatus === statusFilter
 
-    return matchesSearch && matchesRisk && matchesClinic
+    return matchesSearch && matchesRisk && matchesClinic && matchesStatus
+  }).sort((a, b) => {
+    if (sortBy === "Date") {
+      return new Date(b.submissionDate).getTime() - new Date(a.submissionDate).getTime()
+    } else if (sortBy === "Risk (High-Low)") {
+      const riskOrder: Record<string, number> = { High: 3, Medium: 2, Low: 1, Pending: 0 }
+      return (riskOrder[b.riskScore] || 0) - (riskOrder[a.riskScore] || 0)
+    } else if (sortBy === "Risk (Low-High)") {
+      const riskOrder: Record<string, number> = { High: 3, Medium: 2, Low: 1, Pending: 0 }
+      return (riskOrder[a.riskScore] || 0) - (riskOrder[b.riskScore] || 0)
+    }
+    return 0
   })
+
+  // Reset to first page when filters change
+  useEffect(() => {
+    setCurrentPage(1)
+  }, [searchTerm, riskFilter, clinicFilter, statusFilter, sortBy])
+
+  const totalPages = Math.ceil(filteredReports.length / itemsPerPage)
+  const startIndex = (currentPage - 1) * itemsPerPage
+  const endIndex = startIndex + itemsPerPage
+  const paginatedReports = filteredReports.slice(startIndex, endIndex)
 
   const getRiskBadgeClass = (risk: string) => {
     switch (risk) {
@@ -299,8 +325,8 @@ export default function GCFDashboardPage() {
               <CardTitle className="text-xl text-foreground">Report Management</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="flex flex-col sm:flex-row gap-4 mb-6">
-                <div className="relative flex-1">
+              <div className="flex flex-col sm:flex-row gap-4 mb-6 flex-wrap">
+                <div className="relative flex-1 min-w-[200px]">
                   <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground w-4 h-4" />
                   <Input
                     placeholder="Search by Document or Clinic Name..."
@@ -310,7 +336,7 @@ export default function GCFDashboardPage() {
                   />
                 </div>
                 <Select value={riskFilter} onValueChange={setRiskFilter}>
-                  <SelectTrigger className="w-full sm:w-48 dark:bg-muted/50 dark:border-primary/30">
+                  <SelectTrigger className="w-full sm:w-40 dark:bg-muted/50 dark:border-primary/30">
                     <SelectValue placeholder="Filter by Risk" />
                   </SelectTrigger>
                   <SelectContent className="dark:bg-card dark:border-primary/30">
@@ -322,7 +348,7 @@ export default function GCFDashboardPage() {
                   </SelectContent>
                 </Select>
                 <Select value={clinicFilter} onValueChange={setClinicFilter}>
-                  <SelectTrigger className="w-full sm:w-48 dark:bg-muted/50 dark:border-primary/30">
+                  <SelectTrigger className="w-full sm:w-40 dark:bg-muted/50 dark:border-primary/30">
                     <SelectValue placeholder="Filter by Clinic" />
                   </SelectTrigger>
                   <SelectContent className="dark:bg-card dark:border-primary/30">
@@ -330,6 +356,28 @@ export default function GCFDashboardPage() {
                     {Array.from(new Set(reports.map(r => r.clinicName))).map(clinic => (
                       <SelectItem key={clinic} value={clinic}>{clinic}</SelectItem>
                     ))}
+                  </SelectContent>
+                </Select>
+                <Select value={statusFilter} onValueChange={setStatusFilter}>
+                  <SelectTrigger className="w-full sm:w-40 dark:bg-muted/50 dark:border-primary/30">
+                    <SelectValue placeholder="Filter by Status" />
+                  </SelectTrigger>
+                  <SelectContent className="dark:bg-card dark:border-primary/30">
+                    <SelectItem value="All">All Statuses</SelectItem>
+                    <SelectItem value="New">New</SelectItem>
+                    <SelectItem value="Under Review">Under Review</SelectItem>
+                    <SelectItem value="Follow-up Initiated">Follow-up Initiated</SelectItem>
+                    <SelectItem value="Review Complete">Review Complete</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Select value={sortBy} onValueChange={setSortBy}>
+                  <SelectTrigger className="w-full sm:w-40 dark:bg-muted/50 dark:border-primary/30">
+                    <SelectValue placeholder="Sort by" />
+                  </SelectTrigger>
+                  <SelectContent className="dark:bg-card dark:border-primary/30">
+                    <SelectItem value="Date">Date (Newest)</SelectItem>
+                    <SelectItem value="Risk (High-Low)">Risk (High-Low)</SelectItem>
+                    <SelectItem value="Risk (Low-High)">Risk (Low-High)</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -368,7 +416,7 @@ export default function GCFDashboardPage() {
                         </td>
                       </tr>
                     ) : (
-                      filteredReports.map((report) => (
+                      paginatedReports.map((report) => (
                         <tr
                           key={report.id}
                           className="border-b border-border hover:bg-muted/50 dark:hover:bg-primary/5 transition-colors"
@@ -430,19 +478,49 @@ export default function GCFDashboardPage() {
               {/* Pagination */}
               <div className="flex items-center justify-between mt-6">
                 <p className="text-sm text-muted-foreground">
-                  Showing {filteredReports.length} of {reports.length} reports
+                  Showing {startIndex + 1}-{Math.min(endIndex, filteredReports.length)} of {filteredReports.length} reports
                 </p>
                 <div className="flex gap-2">
-                  <Button variant="outline" size="sm" disabled>
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                    disabled={currentPage === 1}
+                  >
                     Previous
                   </Button>
-                  <Button variant="outline" size="sm" className="bg-primary text-primary-foreground glow-primary">
-                    1
-                  </Button>
-                  <Button variant="outline" size="sm">
-                    2
-                  </Button>
-                  <Button variant="outline" size="sm">
+                  
+                  {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                    // Logic to show a window of pages around current page
+                    let pageNum = i + 1;
+                    if (totalPages > 5) {
+                      if (currentPage > 3) {
+                        pageNum = currentPage - 2 + i;
+                      }
+                      if (pageNum > totalPages) {
+                        pageNum = totalPages - (4 - i);
+                      }
+                    }
+                    
+                    return (
+                      <Button
+                        key={pageNum}
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setCurrentPage(pageNum)}
+                        className={currentPage === pageNum ? "bg-primary text-primary-foreground glow-primary" : ""}
+                      >
+                        {pageNum}
+                      </Button>
+                    );
+                  })}
+
+                  <Button 
+                    variant="outline" 
+                    size="sm"
+                    onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+                    disabled={currentPage === totalPages || totalPages === 0}
+                  >
                     Next
                   </Button>
                 </div>
