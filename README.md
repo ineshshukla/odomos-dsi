@@ -9,7 +9,8 @@ Hospitals receive mammography reports in various formats — PDFs, scanned image
 These reports contain critical diagnostic information (e.g., gland density, findings, BIRADS score).  
 The goal is to **automate ingestion, structuring, and risk prediction** from such reports using a combination of document parsing, LLM-based structuring, and ML-based risk modeling.
 
----
+--- 
+
 
 ## 2️⃣ Microservice Architecture
 
